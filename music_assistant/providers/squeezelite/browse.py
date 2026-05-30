@@ -164,13 +164,12 @@ def _playable_actions(uri: str) -> dict[str, Any]:
     }
 
 
-def _paginate(items: list, offset: int, limit: int) -> dict[str, Any]:
+def _paginate(items: list, offset: int, total_count: int | None = None) -> dict[str, Any]:
     """Return a paginated response dict in LMS CLI format."""
-    page = items[offset : offset + limit]
     return {
-        "item_loop": page,
+        "item_loop": items,
         "offset": offset,
-        "count": len(items),
+        "count": total_count if total_count is not None else len(items),
     }
 
 
@@ -187,7 +186,6 @@ async def _handle_artists(
     artist_id = kwargs.get("artist_id")
 
     if artist_id:
-        # Return a single artist's details (albums)
         return await _handle_albums(mass, player_id, 0, limit, artist_id=artist_id)
 
     artists = await mass.music.artists.library_items(
@@ -196,7 +194,7 @@ async def _handle_artists(
         offset=offset,
     )
     items = [_artist_to_item(mass, artist) for artist in artists]
-    return _paginate(items, 0, limit)
+    return _paginate(items, offset)
 
 
 async def _handle_albums(
@@ -217,15 +215,17 @@ async def _handle_albums(
             item_id=artist.item_id,
             provider_instance_id_or_domain=artist.provider,
         )
-        items = [_album_to_item(mass, album) for album in albums]
-    else:
-        albums = await mass.music.albums.library_items(
-            search=search,
-            limit=limit,
-            offset=offset,
-        )
-        items = [_album_to_item(mass, album) for album in albums]
-    return _paginate(items, 0, limit)
+        all_items = [_album_to_item(mass, album) for album in albums]
+        page = all_items[offset : offset + limit]
+        return _paginate(page, offset, total_count=len(all_items))
+
+    albums = await mass.music.albums.library_items(
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    items = [_album_to_item(mass, album) for album in albums]
+    return _paginate(items, offset)
 
 
 async def _handle_tracks(
@@ -246,15 +246,17 @@ async def _handle_tracks(
             item_id=album.item_id,
             provider_instance_id_or_domain=album.provider,
         )
-        items = [_track_to_item(mass, track) for track in tracks]
-    else:
-        tracks = await mass.music.tracks.library_items(
-            search=search,
-            limit=limit,
-            offset=offset,
-        )
-        items = [_track_to_item(mass, track) for track in tracks]
-    return _paginate(items, 0, limit)
+        all_items = [_track_to_item(mass, track) for track in tracks]
+        page = all_items[offset : offset + limit]
+        return _paginate(page, offset, total_count=len(all_items))
+
+    tracks = await mass.music.tracks.library_items(
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    items = [_track_to_item(mass, track) for track in tracks]
+    return _paginate(items, offset)
 
 
 async def _handle_playlists(
@@ -268,7 +270,6 @@ async def _handle_playlists(
     limit = int(args[1]) if len(args) > 1 else 50
     search = kwargs.get("search")
 
-    # Sub-command: playlists tracks
     playlist_id = kwargs.get("playlist_id")
     if playlist_id:
         playlist = await mass.music.playlists.get_library_item(int(playlist_id))
@@ -276,8 +277,9 @@ async def _handle_playlists(
             item_id=playlist.item_id,
             provider_instance_id_or_domain=playlist.provider,
         )
-        items = [_track_to_item(mass, track) for track in tracks]
-        return _paginate(items, 0, limit)
+        all_items = [_track_to_item(mass, track) for track in tracks]
+        page = all_items[offset : offset + limit]
+        return _paginate(page, offset, total_count=len(all_items))
 
     playlists = await mass.music.playlists.library_items(
         search=search,
@@ -285,7 +287,7 @@ async def _handle_playlists(
         offset=offset,
     )
     items = [_playlist_to_item(mass, playlist) for playlist in playlists]
-    return _paginate(items, 0, limit)
+    return _paginate(items, offset)
 
 
 async def _handle_genres(
@@ -320,7 +322,7 @@ async def _handle_genres(
         }
         for genre in genres
     ]
-    return _paginate(items, 0, limit)
+    return _paginate(items, offset)
 
 
 async def _handle_search(
@@ -335,7 +337,7 @@ async def _handle_search(
     term = kwargs.get("term", kwargs.get("search", ""))
 
     if not term:
-        return _paginate([], 0, limit)
+        return _paginate([], 0)
 
     results = await mass.music.search(
         search_query=str(term),
@@ -344,17 +346,18 @@ async def _handle_search(
         library_only=True,
     )
 
-    items: list[dict[str, Any]] = []
+    all_items: list[dict[str, Any]] = []
     for artist in results.artists:
-        items.append(_artist_to_item(mass, artist))
+        all_items.append(_artist_to_item(mass, artist))
     for album in results.albums:
-        items.append(_album_to_item(mass, album))
+        all_items.append(_album_to_item(mass, album))
     for track in results.tracks:
-        items.append(_track_to_item(mass, track))
+        all_items.append(_track_to_item(mass, track))
     for playlist in results.playlists:
-        items.append(_playlist_to_item(mass, playlist))
+        all_items.append(_playlist_to_item(mass, playlist))
 
-    return _paginate(items, offset, limit)
+    page = all_items[offset : offset + limit]
+    return _paginate(page, offset, total_count=len(all_items))
 
 
 def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
