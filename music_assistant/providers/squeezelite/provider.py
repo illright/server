@@ -17,6 +17,7 @@ from music_assistant.helpers.audio import get_mime_type
 from music_assistant.helpers.util import is_port_in_use
 from music_assistant.models.player_provider import PlayerProvider
 
+from .browse import register_browse_handlers
 from .constants import CONF_CLI_JSON_PORT, CONF_CLI_TELNET_PORT
 from .player import SqueezelitePlayer
 
@@ -112,6 +113,8 @@ class SqueezelitePlayerProvider(PlayerProvider):
         self.mass.streams.register_dynamic_route(
             "/jsonrpc.js", self.slimproto.cli._handle_jsonrpc_client
         )
+        # Register library browsing command handlers for hardware Squeezebox players
+        register_browse_handlers(self.mass, self.slimproto)
 
     async def unload(self, is_removed: bool = False) -> None:
         """Handle unload/close of the provider."""

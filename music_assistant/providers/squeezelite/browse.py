@@ -1,0 +1,391 @@
+"""LMS CLI library browsing support for hardware Squeezebox players."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from music_assistant_models.enums import MediaType
+
+if TYPE_CHECKING:
+    from music_assistant_models.media_items import Album, Artist, MediaItemImage, Playlist, Track
+
+    from music_assistant import MusicAssistant
+
+# ruff: noqa: ARG001
+
+
+def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
+    """Return a proxied image URL for the given image, or empty string."""
+    if not image:
+        return ""
+    return mass.metadata.get_image_url(image, size=300)
+
+
+def _track_to_item(mass: MusicAssistant, track: Track) -> dict[str, Any]:
+    """Convert a Track to an LMS CLI item_loop entry."""
+    artist_name = ", ".join(a.name for a in track.artists) if track.artists else ""
+    album_name = track.album.name if track.album else ""
+    image_url = _get_image_url(mass, track.image)
+    return {
+        "id": track.item_id,
+        "track": track.name,
+        "artist": artist_name,
+        "album": album_name,
+        "duration": track.duration or 0,
+        "trackType": "local",
+        "icon": image_url,
+        "artwork_url": image_url,
+        "text": track.name,
+        "style": "itemplay",
+        "nextWindow": "nowPlaying",
+        "params": {
+            "track_id": track.item_id,
+            "item_id": track.item_id,
+            "uri": track.uri or "",
+        },
+        "actions": _playable_actions(track.uri or ""),
+    }
+
+
+def _album_to_item(mass: MusicAssistant, album: Album) -> dict[str, Any]:
+    """Convert an Album to an LMS CLI item_loop entry."""
+    artist_name = ", ".join(a.name for a in album.artists) if album.artists else ""
+    image_url = _get_image_url(mass, album.image)
+    return {
+        "id": album.item_id,
+        "album": album.name,
+        "artist": artist_name,
+        "year": album.year or 0,
+        "icon": image_url,
+        "artwork_url": image_url,
+        "text": album.name,
+        "style": "itemplay",
+        "nextWindow": "nowPlaying",
+        "params": {
+            "item_id": album.item_id,
+            "uri": album.uri or "",
+        },
+        "actions": {
+            "go": {
+                "cmd": ["tracks"],
+                "itemsParams": "commonParams",
+                "params": {"album_id": album.item_id},
+                "player": 0,
+            },
+            **_playable_actions(album.uri or ""),
+        },
+    }
+
+
+def _artist_to_item(mass: MusicAssistant, artist: Artist) -> dict[str, Any]:
+    """Convert an Artist to an LMS CLI item_loop entry."""
+    image_url = _get_image_url(mass, artist.image)
+    return {
+        "id": artist.item_id,
+        "artist": artist.name,
+        "icon": image_url,
+        "artwork_url": image_url,
+        "text": artist.name,
+        "style": "itemNoAction",
+        "params": {
+            "item_id": artist.item_id,
+            "uri": artist.uri or "",
+        },
+        "actions": {
+            "go": {
+                "cmd": ["albums"],
+                "itemsParams": "commonParams",
+                "params": {"artist_id": artist.item_id},
+                "player": 0,
+            },
+            **_playable_actions(artist.uri or ""),
+        },
+    }
+
+
+def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> dict[str, Any]:
+    """Convert a Playlist to an LMS CLI item_loop entry."""
+    image_url = _get_image_url(mass, playlist.image)
+    return {
+        "id": playlist.item_id,
+        "playlist": playlist.name,
+        "icon": image_url,
+        "artwork_url": image_url,
+        "text": playlist.name,
+        "style": "itemplay",
+        "nextWindow": "nowPlaying",
+        "params": {
+            "item_id": playlist.item_id,
+            "uri": playlist.uri or "",
+        },
+        "actions": {
+            "go": {
+                "cmd": ["playlists", "tracks"],
+                "itemsParams": "commonParams",
+                "params": {"playlist_id": playlist.item_id},
+                "player": 0,
+            },
+            **_playable_actions(playlist.uri or ""),
+        },
+    }
+
+
+def _playable_actions(uri: str) -> dict[str, Any]:
+    """Return standard play/add/insert actions for a playable URI."""
+    return {
+        "play": {
+            "cmd": ["playlistcontrol"],
+            "itemsParams": "commonParams",
+            "params": {"uri": uri, "cmd": "play"},
+            "player": 0,
+            "nextWindow": "nowPlaying",
+        },
+        "play-hold": {
+            "cmd": ["playlistcontrol"],
+            "itemsParams": "commonParams",
+            "params": {"uri": uri, "cmd": "load"},
+            "player": 0,
+            "nextWindow": "nowPlaying",
+        },
+        "add": {
+            "cmd": ["playlistcontrol"],
+            "itemsParams": "commonParams",
+            "params": {"uri": uri, "cmd": "add"},
+            "player": 0,
+            "nextWindow": "refresh",
+        },
+        "add-hold": {
+            "cmd": ["playlistcontrol"],
+            "itemsParams": "commonParams",
+            "params": {"uri": uri, "cmd": "insert"},
+            "player": 0,
+            "nextWindow": "refresh",
+        },
+    }
+
+
+def _paginate(items: list, offset: int, limit: int) -> dict[str, Any]:
+    """Return a paginated response dict in LMS CLI format."""
+    page = items[offset : offset + limit]
+    return {
+        "item_loop": page,
+        "offset": offset,
+        "count": len(items),
+    }
+
+
+async def _handle_artists(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'artists' LMS CLI command."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 50
+    search = kwargs.get("search")
+    artist_id = kwargs.get("artist_id")
+
+    if artist_id:
+        # Return a single artist's details (albums)
+        return await _handle_albums(mass, player_id, 0, limit, artist_id=artist_id)
+
+    artists = await mass.music.artists.library_items(
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    items = [_artist_to_item(mass, artist) for artist in artists]
+    return _paginate(items, 0, limit)
+
+
+async def _handle_albums(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'albums' LMS CLI command."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 50
+    search = kwargs.get("search")
+    artist_id = kwargs.get("artist_id")
+
+    if artist_id:
+        artist = await mass.music.artists.get_library_item(int(artist_id))
+        albums = await mass.music.artists.albums(
+            item_id=artist.item_id,
+            provider_instance_id_or_domain=artist.provider,
+        )
+        items = [_album_to_item(mass, album) for album in albums]
+    else:
+        albums = await mass.music.albums.library_items(
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        items = [_album_to_item(mass, album) for album in albums]
+    return _paginate(items, 0, limit)
+
+
+async def _handle_tracks(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'tracks' LMS CLI command."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 50
+    search = kwargs.get("search")
+    album_id = kwargs.get("album_id")
+
+    if album_id:
+        album = await mass.music.albums.get_library_item(int(album_id))
+        tracks = await mass.music.albums.tracks(
+            item_id=album.item_id,
+            provider_instance_id_or_domain=album.provider,
+        )
+        items = [_track_to_item(mass, track) for track in tracks]
+    else:
+        tracks = await mass.music.tracks.library_items(
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        items = [_track_to_item(mass, track) for track in tracks]
+    return _paginate(items, 0, limit)
+
+
+async def _handle_playlists(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'playlists' LMS CLI command."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 50
+    search = kwargs.get("search")
+
+    # Sub-command: playlists tracks
+    playlist_id = kwargs.get("playlist_id")
+    if playlist_id:
+        playlist = await mass.music.playlists.get_library_item(int(playlist_id))
+        tracks = await mass.music.playlists.tracks(
+            item_id=playlist.item_id,
+            provider_instance_id_or_domain=playlist.provider,
+        )
+        items = [_track_to_item(mass, track) for track in tracks]
+        return _paginate(items, 0, limit)
+
+    playlists = await mass.music.playlists.library_items(
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    items = [_playlist_to_item(mass, playlist) for playlist in playlists]
+    return _paginate(items, 0, limit)
+
+
+async def _handle_genres(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'genres' LMS CLI command."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 50
+
+    genres = await mass.music.genres.library_items(
+        limit=limit,
+        offset=offset,
+    )
+    items = [
+        {
+            "id": genre.item_id,
+            "genre": genre.name,
+            "text": genre.name,
+            "style": "itemNoAction",
+            "params": {"item_id": genre.item_id},
+            "actions": {
+                "go": {
+                    "cmd": ["albums"],
+                    "itemsParams": "commonParams",
+                    "params": {"genre_id": genre.item_id},
+                    "player": 0,
+                },
+            },
+        }
+        for genre in genres
+    ]
+    return _paginate(items, 0, limit)
+
+
+async def _handle_search(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'search' LMS CLI command (term-based search)."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 10
+    term = kwargs.get("term", kwargs.get("search", ""))
+
+    if not term:
+        return _paginate([], 0, limit)
+
+    results = await mass.music.search(
+        search_query=str(term),
+        media_types=[MediaType.ARTIST, MediaType.ALBUM, MediaType.TRACK, MediaType.PLAYLIST],
+        limit=limit,
+        library_only=True,
+    )
+
+    items: list[dict[str, Any]] = []
+    for artist in results.artists:
+        items.append(_artist_to_item(mass, artist))
+    for album in results.albums:
+        items.append(_album_to_item(mass, album))
+    for track in results.tracks:
+        items.append(_track_to_item(mass, track))
+    for playlist in results.playlists:
+        items.append(_playlist_to_item(mass, playlist))
+
+    return _paginate(items, offset, limit)
+
+
+def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
+    """
+    Register library browsing command handlers on the SlimServer.
+
+    :param mass: The MusicAssistant instance for library access.
+    :param slimproto: The SlimServer instance to register handlers on.
+    """
+
+    async def handle_artists(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_artists(mass, player_id, *args, **kwargs)
+
+    async def handle_albums(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_albums(mass, player_id, *args, **kwargs)
+
+    async def handle_tracks(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_tracks(mass, player_id, *args, **kwargs)
+
+    async def handle_playlists(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_playlists(mass, player_id, *args, **kwargs)
+
+    async def handle_genres(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_genres(mass, player_id, *args, **kwargs)
+
+    async def handle_search(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_search(mass, player_id, *args, **kwargs)
+
+    slimproto.register_command_handler("artists", handle_artists)
+    slimproto.register_command_handler("albums", handle_albums)
+    slimproto.register_command_handler("tracks", handle_tracks)
+    slimproto.register_command_handler("playlists", handle_playlists)
+    slimproto.register_command_handler("genres", handle_genres)
+    slimproto.register_command_handler("search", handle_search)
