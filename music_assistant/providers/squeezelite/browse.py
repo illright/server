@@ -416,7 +416,7 @@ async def _handle_favorites(
     for playlist in playlists:
         items.append(_playlist_to_item(mass, playlist))
 
-    page = items[:limit]
+    page = items[offset : offset + limit]
     return _paginate(page, offset, total_count=len(items))
 
 
