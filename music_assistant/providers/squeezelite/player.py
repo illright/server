@@ -8,7 +8,7 @@ import struct
 import time
 from collections import deque
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from aioslimproto.models import EventType as SlimEventType
 from aioslimproto.models import PlayerState as SlimPlayerState
@@ -617,7 +617,62 @@ class SqueezelitePlayer(Player):
             _, param = event_data.split(" ", 1)
             if param.isnumeric():
                 await self.mass.player_queues.seek(queue.queue_id, int(param))
+        elif event_data.startswith("playlist "):
+            await self._handle_playlist_cli_command(event_data, queue)
         self.logger.log(VERBOSE_LOG_LEVEL, "CLI Event: %s", event_data)
+
+    async def _handle_playlist_cli_command(self, event_data: str, queue: Any) -> None:
+        """Handle playlist subcommands forwarded as CLI events."""
+        parts = event_data.split(" ", 2)
+        if len(parts) < 2:
+            return
+        subcommand = parts[1]
+        arg = parts[2] if len(parts) > 2 else ""
+
+        if subcommand == "shuffle":
+            if arg == "?":
+                return
+            if arg in ("0", "1", "2"):
+                enabled = arg != "0"
+                await self.mass.player_queues.set_shuffle(queue.queue_id, enabled)
+            else:
+                # toggle
+                await self.mass.player_queues.set_shuffle(queue.queue_id, not queue.shuffle_enabled)
+            self.client.extra_data["playlist shuffle"] = int(queue.shuffle_enabled)
+            self.client.signal_update()
+        elif subcommand == "repeat":
+            if arg == "?":
+                return
+            repeat_map = {"0": RepeatMode.OFF, "1": RepeatMode.ONE, "2": RepeatMode.ALL}
+            if arg in repeat_map:
+                repeat_mode = repeat_map[arg]
+            # toggle
+            elif queue.repeat_mode == RepeatMode.OFF:
+                repeat_mode = RepeatMode.ONE
+            elif queue.repeat_mode == RepeatMode.ONE:
+                repeat_mode = RepeatMode.ALL
+            else:
+                repeat_mode = RepeatMode.OFF
+            self.mass.player_queues.set_repeat(queue.queue_id, repeat_mode)
+            self.client.extra_data["playlist repeat"] = REPEATMODE_MAP[queue.repeat_mode]
+            self.client.signal_update()
+        elif subcommand == "index":
+            if arg == "?":
+                return
+            if arg in ("+1", "1"):
+                await self.mass.player_queues.next(queue.queue_id)
+            elif arg == "-1":
+                await self.mass.player_queues.previous(queue.queue_id)
+            elif arg.startswith("+"):
+                steps = int(arg[1:])
+                for _ in range(steps):
+                    await self.mass.player_queues.next(queue.queue_id)
+            elif arg.startswith("-"):
+                steps = int(arg[1:])
+                for _ in range(steps):
+                    await self.mass.player_queues.previous(queue.queue_id)
+            elif arg.isnumeric():
+                await self.mass.player_queues.play_index(queue.queue_id, int(arg))
 
     def _handle_sync(self) -> None:
         """Synchronize audio of a sync slimplayer."""

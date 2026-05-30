@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from music_assistant_models.enums import MediaType
+from music_assistant_models.enums import MediaType, QueueOption
 
 if TYPE_CHECKING:
     from music_assistant_models.media_items import Album, Artist, MediaItemImage, Playlist, Track
@@ -360,9 +360,72 @@ async def _handle_search(
     return _paginate(page, offset, total_count=len(all_items))
 
 
+async def _handle_playlistcontrol(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'playlistcontrol' LMS CLI command (play/add/insert media)."""
+    cmd = kwargs.get("cmd", "play")
+    uri = kwargs.get("uri", "")
+
+    if not uri:
+        return {"count": 0}
+
+    queue = mass.player_queues.get_active_queue(player_id)
+    if not queue:
+        return {"count": 0}
+
+    cmd_to_option = {
+        "play": QueueOption.PLAY,
+        "load": QueueOption.REPLACE,
+        "add": QueueOption.ADD,
+        "insert": QueueOption.NEXT,
+    }
+    option = cmd_to_option.get(cmd, QueueOption.PLAY)
+    await mass.player_queues.play_media(queue.queue_id, uri, option=option)
+    return {"count": 1}
+
+
+async def _handle_favorites(
+    mass: MusicAssistant,
+    player_id: str,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Handle the 'favorites' LMS CLI command."""
+    offset = int(args[0]) if args else 0
+    limit = int(args[1]) if len(args) > 1 else 50
+
+    items: list[dict[str, Any]] = []
+
+    tracks = await mass.music.tracks.library_items(favorite=True, limit=limit, offset=offset)
+    for track in tracks:
+        items.append(_track_to_item(mass, track))
+
+    albums = await mass.music.albums.library_items(favorite=True, limit=limit, offset=offset)
+    for album in albums:
+        items.append(_album_to_item(mass, album))
+
+    artists = await mass.music.artists.library_items(favorite=True, limit=limit, offset=offset)
+    for artist in artists:
+        items.append(_artist_to_item(mass, artist))
+
+    playlists = await mass.music.playlists.library_items(favorite=True, limit=limit, offset=offset)
+    for playlist in playlists:
+        items.append(_playlist_to_item(mass, playlist))
+
+    page = items[:limit]
+    return _paginate(page, offset, total_count=len(items))
+
+
 def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     """
     Register library browsing command handlers on the SlimServer.
+
+    Handlers are dynamically set as methods on the SlimProtoCLI instance so that
+    the CLI's command dispatch (which uses getattr) can find and invoke them.
 
     :param mass: The MusicAssistant instance for library access.
     :param slimproto: The SlimServer instance to register handlers on.
@@ -386,9 +449,20 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     async def handle_search(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await _handle_search(mass, player_id, *args, **kwargs)
 
-    slimproto.register_command_handler("artists", handle_artists)
-    slimproto.register_command_handler("albums", handle_albums)
-    slimproto.register_command_handler("tracks", handle_tracks)
-    slimproto.register_command_handler("playlists", handle_playlists)
-    slimproto.register_command_handler("genres", handle_genres)
-    slimproto.register_command_handler("search", handle_search)
+    async def handle_playlistcontrol(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_playlistcontrol(mass, player_id, *args, **kwargs)
+
+    async def handle_favorites(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _handle_favorites(mass, player_id, *args, **kwargs)
+
+    # Register handlers on the CLI object by setting _handle_<command> methods
+    # The CLI dispatches commands via getattr(self, f"_handle_{command}")
+    cli = slimproto.cli
+    cli._handle_artists = handle_artists
+    cli._handle_albums = handle_albums
+    cli._handle_tracks = handle_tracks
+    cli._handle_playlists = handle_playlists
+    cli._handle_genres = handle_genres
+    cli._handle_search = handle_search
+    cli._handle_playlistcontrol = handle_playlistcontrol
+    cli._handle_favorites = handle_favorites
