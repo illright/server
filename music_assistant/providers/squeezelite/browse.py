@@ -400,19 +400,19 @@ async def _handle_favorites(
 
     items: list[dict[str, Any]] = []
 
-    tracks = await mass.music.tracks.library_items(favorite=True, limit=limit, offset=offset)
+    tracks = await mass.music.tracks.library_items(favorite=True, limit=500, offset=0)
     for track in tracks:
         items.append(_track_to_item(mass, track))
 
-    albums = await mass.music.albums.library_items(favorite=True, limit=limit, offset=offset)
+    albums = await mass.music.albums.library_items(favorite=True, limit=500, offset=0)
     for album in albums:
         items.append(_album_to_item(mass, album))
 
-    artists = await mass.music.artists.library_items(favorite=True, limit=limit, offset=offset)
+    artists = await mass.music.artists.library_items(favorite=True, limit=500, offset=0)
     for artist in artists:
         items.append(_artist_to_item(mass, artist))
 
-    playlists = await mass.music.playlists.library_items(favorite=True, limit=limit, offset=offset)
+    playlists = await mass.music.playlists.library_items(favorite=True, limit=500, offset=0)
     for playlist in playlists:
         items.append(_playlist_to_item(mass, playlist))
 
