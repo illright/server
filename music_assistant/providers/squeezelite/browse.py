@@ -420,6 +420,136 @@ async def _handle_favorites(
     return _paginate(page, offset, total_count=len(items))
 
 
+def _build_library_menu_items() -> list[dict[str, Any]]:
+    """Build the static library menu items shown on the Squeezebox Controller home screen."""
+    return [
+        {
+            "id": "myMusicArtists",
+            "node": "myMusic",
+            "text": "Artists",
+            "homeMenuText": "Artists",
+            "icon": "html/images/artists.png",
+            "weight": 20,
+            "style": "itemNoAction",
+            "actions": {
+                "go": {
+                    "cmd": ["artists"],
+                    "itemsParams": "commonParams",
+                    "params": {},
+                    "player": 0,
+                },
+            },
+        },
+        {
+            "id": "myMusicAlbums",
+            "node": "myMusic",
+            "text": "Albums",
+            "homeMenuText": "Albums",
+            "icon": "html/images/albums.png",
+            "weight": 21,
+            "style": "itemNoAction",
+            "actions": {
+                "go": {
+                    "cmd": ["albums"],
+                    "itemsParams": "commonParams",
+                    "params": {},
+                    "player": 0,
+                },
+            },
+        },
+        {
+            "id": "myMusicTracks",
+            "node": "myMusic",
+            "text": "Songs",
+            "homeMenuText": "Songs",
+            "icon": "html/images/playall.png",
+            "weight": 22,
+            "style": "itemNoAction",
+            "actions": {
+                "go": {
+                    "cmd": ["tracks"],
+                    "itemsParams": "commonParams",
+                    "params": {},
+                    "player": 0,
+                },
+            },
+        },
+        {
+            "id": "myMusicGenres",
+            "node": "myMusic",
+            "text": "Genres",
+            "homeMenuText": "Genres",
+            "icon": "html/images/genres.png",
+            "weight": 23,
+            "style": "itemNoAction",
+            "actions": {
+                "go": {
+                    "cmd": ["genres"],
+                    "itemsParams": "commonParams",
+                    "params": {},
+                    "player": 0,
+                },
+            },
+        },
+        {
+            "id": "myMusicPlaylists",
+            "node": "myMusic",
+            "text": "Playlists",
+            "homeMenuText": "Playlists",
+            "icon": "html/images/playlists.png",
+            "weight": 24,
+            "style": "itemNoAction",
+            "actions": {
+                "go": {
+                    "cmd": ["playlists"],
+                    "itemsParams": "commonParams",
+                    "params": {},
+                    "player": 0,
+                },
+            },
+        },
+        {
+            "id": "myMusicFavorites",
+            "node": "myMusic",
+            "text": "Favorites",
+            "homeMenuText": "Favorites",
+            "icon": "html/images/favorites.png",
+            "weight": 25,
+            "style": "itemNoAction",
+            "actions": {
+                "go": {
+                    "cmd": ["favorites"],
+                    "itemsParams": "commonParams",
+                    "params": {},
+                    "player": 0,
+                },
+            },
+        },
+        {
+            "id": "myMusicSearch",
+            "node": "myMusic",
+            "text": "Search",
+            "homeMenuText": "Search",
+            "icon": "html/images/search.png",
+            "weight": 30,
+            "style": "itemNoAction",
+            "input": {
+                "len": 1,
+                "processingPopup": {"text": "SEARCHING"},
+                "help": {"text": "JIVE_SEARCHFOR_HELP"},
+            },
+            "actions": {
+                "go": {
+                    "cmd": ["search"],
+                    "itemsParams": "commonParams",
+                    "params": {"search": "__TAGGEDINPUT__"},
+                    "player": 0,
+                },
+            },
+        },
+    ]
+
+
 def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     """
     Register library browsing command handlers on the SlimServer.
@@ -455,9 +585,30 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     async def handle_favorites(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await _handle_favorites(mass, player_id, *args, **kwargs)
 
+    # Build the library menu items for the Squeezebox Controller's home menu
+    library_menu_items = _build_library_menu_items()
+
+    # Wrap the existing menu handler to include library entries
+    cli = slimproto.cli
+    original_handle_menu = cli._handle_menu
+
+    async def handle_menu(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Return library menu items merged with original presets."""
+        original = await original_handle_menu(player_id, *args, **kwargs)
+        preset_items = original.get("item_loop", [])
+        all_items = library_menu_items + preset_items
+        offset = int(args[0]) if args else int(kwargs.get("_index", 0))
+        limit = int(args[1]) if len(args) > 1 else int(kwargs.get("_quantity", 200))
+        page = all_items[offset : offset + limit]
+        return {
+            "item_loop": page,
+            "offset": offset,
+            "count": len(all_items),
+        }
+
     # Register handlers on the CLI object by setting _handle_<command> methods
     # The CLI dispatches commands via getattr(self, f"_handle_{command}")
-    cli = slimproto.cli
+    cli._handle_menu = handle_menu
     cli._handle_artists = handle_artists
     cli._handle_albums = handle_albums
     cli._handle_tracks = handle_tracks
