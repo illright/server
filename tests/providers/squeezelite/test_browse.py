@@ -370,6 +370,31 @@ class TestHandlePlaylistControl:
             "queue_1", "test://track/1", option=QueueOption.ADD
         )
 
+    @pytest.mark.asyncio
+    async def test_delete_removes_matching_items(self):
+        """Handler removes items from queue by URI when cmd is 'delete'."""
+        mass = _make_mass_mock()
+        queue = MagicMock()
+        queue.queue_id = "queue_1"
+        mass.player_queues.get_active_queue = MagicMock(return_value=queue)
+
+        # Simulate queue items with URIs
+        item1 = MagicMock()
+        item1.uri = "test://track/1"
+        item1.queue_item_id = "qi_1"
+        item2 = MagicMock()
+        item2.uri = "test://track/2"
+        item2.queue_item_id = "qi_2"
+        mass.player_queues.get_item = MagicMock(return_value=[item1, item2])
+        mass.player_queues.delete_item = AsyncMock()
+
+        result = await _handle_playlistcontrol(
+            mass, "player1", cmd="delete", uri="test://track/1"
+        )
+
+        assert result == {"count": 1}
+        mass.player_queues.delete_item.assert_called_once_with("queue_1", "qi_1")
+
 
 # --- Tests for _handle_favorites ---
 

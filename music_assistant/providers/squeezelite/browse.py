@@ -509,7 +509,15 @@ async def _handle_search(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'search' browse command (SlimBrowse response) (term-based search)."""
+    """Handle the 'search' browse command (SlimBrowse response).
+
+    Accepts both `term` (LMS CLI standard) and `search` (legacy/alias) parameters.
+
+    Note: The LMS CLI spec returns separate contributors_loop, albums_loop, and
+    tracks_loop in the response. This implementation returns a single flat item_loop
+    mixing all result types, which is the expected format for SlimBrowse/SqueezePlay
+    menu rendering on hardware Controllers.
+    """
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else 10
     term = kwargs.get("term", kwargs.get("search", ""))
@@ -544,9 +552,17 @@ async def _handle_playlistcontrol(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowsePlaylistControlResponse:
-    """Handle the 'playlistcontrol' browse command (SlimBrowse response) (play/add/insert media).
+    """Handle the 'playlistcontrol' browse command (SlimBrowse response).
+
+    Supports play/load/add/insert/delete actions on media URIs.
 
     See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
+
+    Note: The LMS CLI spec also supports selectors like genre_id, artist_id,
+    album_id, track_id (comma-separated), year, folder_id, playlist_name,
+    play_index, and sort. This implementation only uses the `uri` parameter
+    (a Music Assistant extension) to identify media. The `delete` command
+    removes items from the current queue by URI.
     """
     cmd = kwargs.get("cmd", "play")
     uri = kwargs.get("uri", "")
@@ -557,6 +573,16 @@ async def _handle_playlistcontrol(
     queue = mass.player_queues.get_active_queue(player_id)
     if not queue:
         return {"count": 0}
+
+    if cmd == "delete":
+        # Remove matching items from the current queue by URI.
+        queue_items = mass.player_queues.get_item(queue.queue_id)
+        removed = 0
+        for item in list(queue_items) if queue_items else []:
+            if getattr(item, "uri", None) == uri:
+                await mass.player_queues.delete_item(queue.queue_id, item.queue_item_id)
+                removed += 1
+        return {"count": removed}
 
     cmd_to_option = {
         "play": QueueOption.PLAY,
@@ -575,7 +601,14 @@ async def _handle_favorites(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'favorites' browse command (SlimBrowse response)."""
+    """Handle the 'favorites' browse command (SlimBrowse response).
+
+    Note: The LMS CLI spec uses 'favorites items <start> <count>' with params like
+    item_id, search, want_url, feedMode. This implementation is a Music Assistant
+    adaptation that returns all favorited media (tracks, albums, artists, playlists)
+    from the MA library as a flat SlimBrowse item_loop. It does not implement the
+    LMS favorites hierarchy or the documented CLI parameters.
+    """
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
 

@@ -147,7 +147,7 @@ def build_library_menu_items() -> list[dict[str, Any]]:
                 "go": {
                     "cmd": ["search"],
                     "itemsParams": "commonParams",
-                    "params": {"search": "__TAGGEDINPUT__"},
+                    "params": {"term": "__TAGGEDINPUT__"},
                     "player": 0,
                 },
             },
