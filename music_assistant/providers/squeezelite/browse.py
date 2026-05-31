@@ -290,9 +290,9 @@ def _playable_actions(uri: str) -> dict[str, Any]:
 
 
 def _paginate(items: list, offset: int, total_count: int | None = None) -> SlimBrowseItemResponse:
-    """Return a paginated response dict in LMS CLI format.
+    """Return a paginated SlimBrowse item_loop response.
 
-    See: https://lyrion.org/reference/cli/database/
+    See: https://lyrion.org/reference/slimbrowse/
 
     :param items: The page of items to return.
     :param offset: The starting index of this page within the full result set.
@@ -312,7 +312,7 @@ async def _handle_artists(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'artists' LMS CLI command.
+    """Handle the 'artists' browse command (SlimBrowse response).
 
     See: https://lyrion.org/reference/cli/database/#artists
 
@@ -353,7 +353,7 @@ async def _handle_albums(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'albums' LMS CLI command.
+    """Handle the 'albums' browse command (SlimBrowse response).
 
     See: https://lyrion.org/reference/cli/database/#albums
 
@@ -393,7 +393,7 @@ async def _handle_tracks(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'tracks' LMS CLI command.
+    """Handle the 'tracks' browse command (SlimBrowse response).
 
     See: https://lyrion.org/reference/cli/database/#titles
 
@@ -433,7 +433,7 @@ async def _handle_playlists(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'playlists' LMS CLI command.
+    """Handle the 'playlists' browse command (SlimBrowse response).
 
     See: https://lyrion.org/reference/cli/database/#playlists
 
@@ -471,7 +471,7 @@ async def _handle_genres(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'genres' LMS CLI command.
+    """Handle the 'genres' browse command (SlimBrowse response).
 
     See: https://lyrion.org/reference/cli/database/#genres
     """
@@ -509,7 +509,7 @@ async def _handle_search(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'search' LMS CLI command (term-based search)."""
+    """Handle the 'search' browse command (SlimBrowse response) (term-based search)."""
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else 10
     term = kwargs.get("term", kwargs.get("search", ""))
@@ -544,7 +544,7 @@ async def _handle_playlistcontrol(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowsePlaylistControlResponse:
-    """Handle the 'playlistcontrol' LMS CLI command (play/add/insert media).
+    """Handle the 'playlistcontrol' browse command (SlimBrowse response) (play/add/insert media).
 
     See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
     """
@@ -575,7 +575,7 @@ async def _handle_favorites(
     *args: Any,
     **kwargs: Any,
 ) -> SlimBrowseItemResponse:
-    """Handle the 'favorites' LMS CLI command."""
+    """Handle the 'favorites' browse command (SlimBrowse response)."""
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
 
