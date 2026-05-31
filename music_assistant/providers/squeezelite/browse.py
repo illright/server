@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
-from music_assistant_models.enums import MediaType, QueueOption
+from music_assistant_models.enums import AlbumType, MediaType, QueueOption
+from music_assistant_models.media_items import Album, Artist, ItemMapping, Playlist, Track
 
 from .menu import build_library_menu_items
 
@@ -26,6 +27,84 @@ if TYPE_CHECKING:
 
 # Default number of items returned per page when the client does not specify a limit.
 DEFAULT_PAGE_SIZE = 50
+
+
+def _get_textkey(item: Artist | Album | Track | Playlist | ItemMapping) -> str:
+    """Return the first letter of the item's sort name, uppercased."""
+    name = item.sort_name or item.name
+    return name[0].upper() if name else ""
+
+
+def _format_artist_block(artist: Artist | ItemMapping) -> dict[str, Any]:
+    """Format an artist item into an LMS response block."""
+    return {
+        "id": artist.item_id,
+        "artist": artist.name,
+        "textkey": _get_textkey(artist),
+    }
+
+
+def _format_album_block(album: Album | ItemMapping) -> dict[str, Any]:
+    """Format an album item into an LMS response block."""
+    block: dict[str, Any] = {
+        "id": album.item_id,
+        "album": album.name,
+        "textkey": _get_textkey(album),
+    }
+    if isinstance(album, Album):
+        if album.year:
+            block["year"] = album.year
+        if album.artists:
+            first_artist = album.artists[0]
+            block["artist"] = first_artist.name
+            block["artist_id"] = first_artist.item_id
+        if album.album_type == AlbumType.COMPILATION:
+            block["compilation"] = 1
+    elif isinstance(album, ItemMapping) and album.year:
+        block["year"] = album.year
+    return block
+
+
+def _format_track_block(track: Track | ItemMapping) -> dict[str, Any]:
+    """Format a track item into an LMS response block."""
+    block: dict[str, Any] = {
+        "id": track.item_id,
+        "title": track.name,
+    }
+    if isinstance(track, Track):
+        block["duration"] = track.duration
+        if track.track_number:
+            block["tracknum"] = track.track_number
+        if track.disc_number:
+            block["disc"] = track.disc_number
+        if track.artists:
+            first_artist = track.artists[0]
+            block["artist"] = first_artist.name
+            block["artist_id"] = first_artist.item_id
+        if track.album:
+            block["album"] = track.album.name
+            block["album_id"] = track.album.item_id
+            # Year may be on the album (full Album) or ItemMapping
+            album_year = getattr(track.album, "year", None)
+            if album_year:
+                block["year"] = album_year
+        if track.metadata.genres:
+            block["genre"] = next(iter(track.metadata.genres))
+        if track.uri:
+            block["url"] = track.uri
+    return block
+
+
+def _format_playlist_block(playlist: Playlist | ItemMapping) -> dict[str, Any]:
+    """Format a playlist item into an LMS response block."""
+    block: dict[str, Any] = {
+        "id": playlist.item_id,
+        "playlist": playlist.name,
+        "textkey": _get_textkey(playlist),
+    }
+    if playlist.uri:
+        block["url"] = playlist.uri
+    return block
 
 
 class SlimBrowsePlaylistControlResponse(TypedDict):
@@ -69,7 +148,7 @@ async def _handle_artists(
         # Return info for the specific artist
         artist = await mass.music.artists.get_library_item(int(artist_id))
         response_first_block["count"] = 1
-        return [response_first_block, {"id": artist_id, "artist": artist.name}]
+        return [response_first_block, _format_artist_block(artist)]
 
     # TODO: Add filtering by album_id and genre_id
 
@@ -79,9 +158,7 @@ async def _handle_artists(
         offset=offset,
     )
     response_first_block["count"] = len(artists)
-    return [response_first_block] + [
-        {"id": artist.item_id, "artist": artist.name} for artist in artists
-    ]
+    return [response_first_block] + [_format_artist_block(artist) for artist in artists]
 
 
 async def _handle_albums(
@@ -116,7 +193,7 @@ async def _handle_albums(
         # Return info for the specific album
         album = await mass.music.albums.get_library_item(int(album_id))
         response_first_block["count"] = 1
-        return [response_first_block, {"id": album_id, "album": album.name}]
+        return [response_first_block, _format_album_block(album)]
 
     if artist_id:
         artist = await mass.music.artists.get_library_item(int(artist_id))
@@ -126,9 +203,7 @@ async def _handle_albums(
         )
         page = list(albums)[offset : offset + limit]
         response_first_block["count"] = len(page)
-        return [response_first_block] + [
-            {"id": album.item_id, "album": album.name} for album in page
-        ]
+        return [response_first_block] + [_format_album_block(album) for album in page]
 
     albums = await mass.music.albums.library_items(
         search=search,
@@ -136,9 +211,7 @@ async def _handle_albums(
         offset=offset,
     )
     response_first_block["count"] = len(albums)
-    return [response_first_block] + [
-        {"id": album.item_id, "album": album.name} for album in albums
-    ]
+    return [response_first_block] + [_format_album_block(album) for album in albums]
 
 
 async def _handle_tracks(
@@ -173,7 +246,7 @@ async def _handle_tracks(
         # Return info for the specific track
         track = await mass.music.tracks.get_library_item(int(track_id))
         response_first_block["count"] = 1
-        return [response_first_block, {"id": track_id, "title": track.name}]
+        return [response_first_block, _format_track_block(track)]
 
     if album_id:
         album = await mass.music.albums.get_library_item(int(album_id))
@@ -183,9 +256,7 @@ async def _handle_tracks(
         )
         page = list(tracks)[offset : offset + limit]
         response_first_block["count"] = len(page)
-        return [response_first_block] + [
-            {"id": track.item_id, "title": track.name} for track in page
-        ]
+        return [response_first_block] + [_format_track_block(track) for track in page]
 
     tracks = await mass.music.tracks.library_items(
         search=search,
@@ -193,9 +264,7 @@ async def _handle_tracks(
         offset=offset,
     )
     response_first_block["count"] = len(tracks)
-    return [response_first_block] + [
-        {"id": track.item_id, "title": track.name} for track in tracks
-    ]
+    return [response_first_block] + [_format_track_block(track) for track in tracks]
 
 
 async def _handle_playlists(
@@ -240,9 +309,7 @@ async def _handle_playlists(
         )
         page = list(tracks)[offset : offset + limit]
         response_first_block["count"] = len(page)
-        return [response_first_block] + [
-            {"id": track.item_id, "title": track.name} for track in page
-        ]
+        return [response_first_block] + [_format_track_block(track) for track in page]
 
     playlists = await mass.music.playlists.library_items(
         search=search,
@@ -250,9 +317,7 @@ async def _handle_playlists(
         offset=offset,
     )
     response_first_block["count"] = len(playlists)
-    return [response_first_block] + [
-        {"id": playlist.item_id, "playlist": playlist.name} for playlist in playlists
-    ]
+    return [response_first_block] + [_format_playlist_block(playlist) for playlist in playlists]
 
 
 async def _handle_genres(
@@ -282,7 +347,14 @@ async def _handle_genres(
     if genre_id:
         genre = await mass.music.genres.get_library_item(int(genre_id))
         response_first_block["count"] = 1
-        return [response_first_block, {"id": genre_id, "genre": genre.name}]
+        return [
+            response_first_block,
+            {
+                "id": genre_id,
+                "genre": genre.name,
+                "textkey": genre.name[0].upper() if genre.name else "",
+            },
+        ]
 
     genres = await mass.music.genres.library_items(
         limit=limit,
@@ -290,7 +362,12 @@ async def _handle_genres(
     )
     response_first_block["count"] = len(genres)
     return [response_first_block] + [
-        {"id": genre.item_id, "genre": genre.name} for genre in genres
+        {
+            "id": genre.item_id,
+            "genre": genre.name,
+            "textkey": genre.name[0].upper() if genre.name else "",
+        }
+        for genre in genres
     ]
 
 
@@ -329,13 +406,13 @@ async def _handle_search(
 
     all_items: list[dict[str, Any]] = []
     for artist in results.artists:
-        all_items.append({"id": artist.item_id, "artist": artist.name})
+        all_items.append(_format_artist_block(artist))
     for album in results.albums:
-        all_items.append({"id": album.item_id, "album": album.name})
+        all_items.append(_format_album_block(album))
     for track in results.tracks:
-        all_items.append({"id": track.item_id, "title": track.name})
+        all_items.append(_format_track_block(track))
     for playlist in results.playlists:
-        all_items.append({"id": playlist.item_id, "playlist": playlist.name})
+        all_items.append(_format_playlist_block(playlist))
 
     page = all_items[offset : offset + limit]
     response_first_block["count"] = len(page)
@@ -419,13 +496,13 @@ async def _handle_favorites(
 
     all_items: list[dict[str, Any]] = []
     for track in tracks:
-        all_items.append({"id": track.item_id, "title": track.name})
+        all_items.append(_format_track_block(track))
     for album in albums:
-        all_items.append({"id": album.item_id, "album": album.name})
+        all_items.append(_format_album_block(album))
     for artist in artists:
-        all_items.append({"id": artist.item_id, "artist": artist.name})
+        all_items.append(_format_artist_block(artist))
     for playlist in playlists:
-        all_items.append({"id": playlist.item_id, "playlist": playlist.name})
+        all_items.append(_format_playlist_block(playlist))
 
     page = all_items[offset : offset + limit]
     response_first_block: dict[str, Any] = {
