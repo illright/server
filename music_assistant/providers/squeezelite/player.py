@@ -671,7 +671,7 @@ class SqueezelitePlayer(Player):
         elif subcommand == "index":
             if arg == "?":
                 # Return the current track index to the Controller.
-                current_index = queue.current_index if hasattr(queue, "current_index") else 0
+                current_index = getattr(queue, "current_index", 0)
                 self.client.extra_data["playlist index"] = current_index
                 self.client.signal_update()
                 return
