@@ -635,8 +635,10 @@ class SqueezelitePlayer(Player):
 
         if subcommand == "shuffle":
             if arg == "?":
-                # Query not resolved here — the Controller firmware reads the current
-                # shuffle state from the player status response, not from this command.
+                # Return the current shuffle state to the Controller.
+                # 0=off, 1=songs, 2=albums (MA only supports on/off so we use 0/1).
+                self.client.extra_data["playlist shuffle"] = int(queue.shuffle_enabled)
+                self.client.signal_update()
                 return
             if arg in ("0", "1", "2"):
                 enabled = arg != "0"
@@ -648,8 +650,10 @@ class SqueezelitePlayer(Player):
             self.client.signal_update()
         elif subcommand == "repeat":
             if arg == "?":
-                # Query not resolved here — the Controller firmware reads the current
-                # repeat state from the player status response, not from this command.
+                # Return the current repeat state to the Controller.
+                # 0=off, 1=repeat one, 2=repeat all.
+                self.client.extra_data["playlist repeat"] = REPEATMODE_MAP[queue.repeat_mode]
+                self.client.signal_update()
                 return
             repeat_map = {"0": RepeatMode.OFF, "1": RepeatMode.ONE, "2": RepeatMode.ALL}
             if arg in repeat_map:
@@ -666,8 +670,10 @@ class SqueezelitePlayer(Player):
             self.client.signal_update()
         elif subcommand == "index":
             if arg == "?":
-                # Query not resolved here — the Controller firmware reads the current
-                # index from the status response, not from this command's response.
+                # Return the current track index to the Controller.
+                current_index = queue.current_index if hasattr(queue, "current_index") else 0
+                self.client.extra_data["playlist index"] = current_index
+                self.client.signal_update()
                 return
             if arg == "+1":
                 await self.mass.player_queues.next(queue.queue_id)

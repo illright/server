@@ -35,7 +35,9 @@ DEFAULT_PAGE_SIZE = 50
 class LMSItemLoopResponse(TypedDict):
     """Response format for LMS CLI commands that return lists of items.
 
-    See: https://lyrion.org/reference/cli/database/
+    The item_loop structure follows the SlimBrowse protocol format:
+    https://lyrion.org/reference/slimbrowse/
+
     The `item_loop` field contains the paginated results, `offset` is the starting
     index of the returned page, and `count` is the total number of items available
     (not just the items in this page).
@@ -49,12 +51,83 @@ class LMSItemLoopResponse(TypedDict):
 class LMSPlaylistControlResponse(TypedDict):
     """Response format for the 'playlistcontrol' LMS CLI command.
 
-    See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
-    The `count` field indicates the number of items that were added/inserted/played
-    (1 on success, 0 if nothing was done).
+    See: https://lyrion.org/reference/cli/playlist/#playlistcontrol
     """
 
     count: int
+
+
+class LMSTrackItem(TypedDict):
+    """A single track entry in a SlimBrowse item_loop response.
+
+    See: https://lyrion.org/reference/slimbrowse/
+    """
+
+    id: str
+    track: str
+    artist: str
+    album: str
+    duration: int
+    trackType: str
+    icon: str
+    artwork_url: str
+    text: str
+    style: str
+    nextWindow: str
+    params: dict[str, Any]
+    actions: dict[str, Any]
+
+
+class LMSAlbumItem(TypedDict):
+    """A single album entry in a SlimBrowse item_loop response.
+
+    See: https://lyrion.org/reference/slimbrowse/
+    """
+
+    id: str
+    album: str
+    artist: str
+    year: int
+    icon: str
+    artwork_url: str
+    text: str
+    style: str
+    nextWindow: str
+    params: dict[str, Any]
+    actions: dict[str, Any]
+
+
+class LMSArtistItem(TypedDict):
+    """A single artist entry in a SlimBrowse item_loop response.
+
+    See: https://lyrion.org/reference/slimbrowse/
+    """
+
+    id: str
+    artist: str
+    icon: str
+    artwork_url: str
+    text: str
+    style: str
+    params: dict[str, Any]
+    actions: dict[str, Any]
+
+
+class LMSPlaylistItem(TypedDict):
+    """A single playlist entry in a SlimBrowse item_loop response.
+
+    See: https://lyrion.org/reference/slimbrowse/
+    """
+
+    id: str
+    playlist: str
+    icon: str
+    artwork_url: str
+    text: str
+    style: str
+    nextWindow: str
+    params: dict[str, Any]
+    actions: dict[str, Any]
 
 
 def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
@@ -64,8 +137,8 @@ def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
     return mass.metadata.get_image_url(image, size=IMAGE_PROXY_SIZE)
 
 
-def _track_to_item(mass: MusicAssistant, track: Track) -> dict[str, Any]:
-    """Convert a Track to an LMS CLI item_loop entry."""
+def _track_to_item(mass: MusicAssistant, track: Track) -> LMSTrackItem:
+    """Convert a Track to an LMS SlimBrowse item_loop entry."""
     artist_name = ", ".join(a.name for a in track.artists) if track.artists else ""
     album_name = track.album.name if track.album else ""
     image_url = _get_image_url(mass, track.image)
@@ -93,8 +166,8 @@ def _track_to_item(mass: MusicAssistant, track: Track) -> dict[str, Any]:
     }
 
 
-def _album_to_item(mass: MusicAssistant, album: Album) -> dict[str, Any]:
-    """Convert an Album to an LMS CLI item_loop entry."""
+def _album_to_item(mass: MusicAssistant, album: Album) -> LMSAlbumItem:
+    """Convert an Album to an LMS SlimBrowse item_loop entry."""
     artist_name = ", ".join(a.name for a in album.artists) if album.artists else ""
     image_url = _get_image_url(mass, album.image)
     return {
@@ -123,8 +196,8 @@ def _album_to_item(mass: MusicAssistant, album: Album) -> dict[str, Any]:
     }
 
 
-def _artist_to_item(mass: MusicAssistant, artist: Artist) -> dict[str, Any]:
-    """Convert an Artist to an LMS CLI item_loop entry."""
+def _artist_to_item(mass: MusicAssistant, artist: Artist) -> LMSArtistItem:
+    """Convert an Artist to an LMS SlimBrowse item_loop entry."""
     image_url = _get_image_url(mass, artist.image)
     return {
         "id": artist.item_id,
@@ -149,8 +222,8 @@ def _artist_to_item(mass: MusicAssistant, artist: Artist) -> dict[str, Any]:
     }
 
 
-def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> dict[str, Any]:
-    """Convert a Playlist to an LMS CLI item_loop entry."""
+def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> LMSPlaylistItem:
+    """Convert a Playlist to an LMS SlimBrowse item_loop entry."""
     image_url = _get_image_url(mass, playlist.image)
     return {
         "id": playlist.item_id,
