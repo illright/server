@@ -5,20 +5,18 @@ JSONRPC/CometD transport (SlimBrowse protocol). While the commands share names
 with LMS CLI database commands (https://lyrion.org/reference/cli/database/),
 the responses here use the SlimBrowse item_loop format described at:
 https://lyrion.org/reference/slimbrowse/
-
-LMS CLI and SlimBrowse are distinct protocols — LMS CLI returns tagged parameter
-strings, while SlimBrowse returns structured JSON with item_loop arrays. These
-handlers serve the SlimBrowse layer.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from music_assistant_models.enums import MediaType, QueueOption
 
 from .menu import build_library_menu_items
+from .slimbrowse_protocol import SlimBrowseActionsFields, SlimBrowseItemResponse
 
 if TYPE_CHECKING:
     from music_assistant_models.media_items import Album, Artist, MediaItemImage, Playlist, Track
@@ -34,22 +32,6 @@ IMAGE_PROXY_SIZE = 300
 
 # Default number of items returned per page when the client does not specify a limit.
 DEFAULT_PAGE_SIZE = 50
-
-
-class SlimBrowseItemResponse(TypedDict):
-    """Response format for SlimBrowse commands that return lists of items.
-
-    This is the structured JSON response sent over JSONRPC/CometD to Squeezebox
-    hardware Controllers. The format is defined by the SlimBrowse protocol:
-    https://lyrion.org/reference/slimbrowse/
-
-    Note: This is NOT the LMS CLI text-protocol format. LMS CLI database commands
-    return tagged parameter strings; these handlers serve the SlimBrowse layer instead.
-    """
-
-    item_loop: list[dict[str, Any]]
-    offset: int
-    count: int
 
 
 class SlimBrowsePlaylistControlResponse(TypedDict):
@@ -81,7 +63,7 @@ class SlimBrowseTrackItem(TypedDict):
     style: str
     nextWindow: str
     params: dict[str, Any]
-    actions: dict[str, Any]
+    actions: SlimBrowseActionsFields
 
 
 class SlimBrowseAlbumItem(TypedDict):
@@ -100,7 +82,7 @@ class SlimBrowseAlbumItem(TypedDict):
     style: str
     nextWindow: str
     params: dict[str, Any]
-    actions: dict[str, Any]
+    actions: SlimBrowseActionsFields
 
 
 class SlimBrowseArtistItem(TypedDict):
@@ -116,7 +98,7 @@ class SlimBrowseArtistItem(TypedDict):
     text: str
     style: str
     params: dict[str, Any]
-    actions: dict[str, Any]
+    actions: SlimBrowseActionsFields
 
 
 class SlimBrowsePlaylistItem(TypedDict):
@@ -133,7 +115,27 @@ class SlimBrowsePlaylistItem(TypedDict):
     style: str
     nextWindow: str
     params: dict[str, Any]
-    actions: dict[str, Any]
+    actions: SlimBrowseActionsFields
+
+
+class SlimBrowseGenreItem(TypedDict):
+    """A single genre entry in a SlimBrowse item_loop response."""
+
+    id: str
+    genre: str
+    text: str
+    style: str
+    params: dict[str, Any]
+    actions: SlimBrowseActionsFields
+
+
+BrowseItem = (
+    SlimBrowseTrackItem
+    | SlimBrowseAlbumItem
+    | SlimBrowseArtistItem
+    | SlimBrowsePlaylistItem
+    | SlimBrowseGenreItem
+)
 
 
 def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
@@ -255,7 +257,7 @@ def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> SlimBrowsePla
     }
 
 
-def _playable_actions(uri: str) -> dict[str, Any]:
+def _playable_actions(uri: str) -> SlimBrowseActionsFields:
     """Return standard play/add/insert actions for a playable URI."""
     return {
         "play": {
@@ -289,19 +291,17 @@ def _playable_actions(uri: str) -> dict[str, Any]:
     }
 
 
-def _paginate(items: list, offset: int, total_count: int | None = None) -> SlimBrowseItemResponse:
+def _convert_to_response(
+    items: Sequence[BrowseItem], total_count: int | None = None
+) -> SlimBrowseItemResponse:
     """Return a paginated SlimBrowse item_loop response.
 
-    See: https://lyrion.org/reference/slimbrowse/
-
     :param items: The page of items to return.
-    :param offset: The starting index of this page within the full result set.
     :param total_count: The total number of items available across all pages.
         If not provided, defaults to the length of the items list.
     """
     return {
         "item_loop": items,
-        "offset": offset,
         "count": total_count if total_count is not None else len(items),
     }
 
@@ -332,7 +332,7 @@ async def _handle_artists(
         # Return info for the specific artist
         artist = await mass.music.artists.get_library_item(int(artist_id))
         items = [_artist_to_item(mass, artist)]
-        return _paginate(items, 0, total_count=1)
+        return _convert_to_response(items)
 
     # Note: album_id and genre_id filters are not yet fully implemented in the
     # Music Assistant library API. For now, we fall through to the general listing.
@@ -344,7 +344,7 @@ async def _handle_artists(
         offset=offset,
     )
     items = [_artist_to_item(mass, artist) for artist in artists]
-    return _paginate(items, offset)
+    return _convert_to_response(items)
 
 
 async def _handle_albums(
@@ -376,7 +376,7 @@ async def _handle_albums(
         )
         all_items = [_album_to_item(mass, album) for album in albums]
         page = all_items[offset : offset + limit]
-        return _paginate(page, offset, total_count=len(all_items))
+        return _convert_to_response(page, total_count=len(all_items))
 
     albums = await mass.music.albums.library_items(
         search=search,
@@ -384,7 +384,7 @@ async def _handle_albums(
         offset=offset,
     )
     items = [_album_to_item(mass, album) for album in albums]
-    return _paginate(items, offset)
+    return _convert_to_response(items)
 
 
 async def _handle_tracks(
@@ -416,7 +416,7 @@ async def _handle_tracks(
         )
         all_items = [_track_to_item(mass, track) for track in tracks]
         page = all_items[offset : offset + limit]
-        return _paginate(page, offset, total_count=len(all_items))
+        return _convert_to_response(page, total_count=len(all_items))
 
     tracks = await mass.music.tracks.library_items(
         search=search,
@@ -424,7 +424,7 @@ async def _handle_tracks(
         offset=offset,
     )
     items = [_track_to_item(mass, track) for track in tracks]
-    return _paginate(items, offset)
+    return _convert_to_response(items)
 
 
 async def _handle_playlists(
@@ -462,7 +462,7 @@ async def _handle_playlists(
         )
         all_items = [_track_to_item(mass, track) for track in tracks]
         page = all_items[offset : offset + limit]
-        return _paginate(page, offset, total_count=len(all_items))
+        return _convert_to_response(page, total_count=len(all_items))
 
     playlists = await mass.music.playlists.library_items(
         search=search,
@@ -470,7 +470,7 @@ async def _handle_playlists(
         offset=offset,
     )
     items = [_playlist_to_item(mass, playlist) for playlist in playlists]
-    return _paginate(items, offset)
+    return _convert_to_response(items)
 
 
 async def _handle_genres(
@@ -490,7 +490,7 @@ async def _handle_genres(
         limit=limit,
         offset=offset,
     )
-    items = [
+    items: list[SlimBrowseGenreItem] = [
         {
             "id": genre.item_id,
             "genre": genre.name,
@@ -508,7 +508,7 @@ async def _handle_genres(
         }
         for genre in genres
     ]
-    return _paginate(items, offset)
+    return _convert_to_response(items)
 
 
 async def _handle_search(
@@ -531,7 +531,7 @@ async def _handle_search(
     term = kwargs.get("term", kwargs.get("search", ""))
 
     if not term:
-        return _paginate([], 0)
+        return _convert_to_response([])
 
     results = await mass.music.search(
         search_query=str(term),
@@ -540,7 +540,7 @@ async def _handle_search(
         library_only=True,
     )
 
-    all_items: list[dict[str, Any]] = []
+    all_items: list[BrowseItem] = []
     for artist in results.artists:
         all_items.append(_artist_to_item(mass, artist))
     for album in results.albums:
@@ -551,7 +551,7 @@ async def _handle_search(
         all_items.append(_playlist_to_item(mass, playlist))
 
     page = all_items[offset : offset + limit]
-    return _paginate(page, offset, total_count=len(all_items))
+    return _convert_to_response(page, total_count=len(all_items))
 
 
 async def _handle_playlistcontrol(
@@ -629,7 +629,7 @@ async def _handle_favorites(
         tracks_coro, albums_coro, artists_coro, playlists_coro
     )
 
-    items: list[dict[str, Any]] = []
+    items: list[BrowseItem] = []
     for track in tracks:
         items.append(_track_to_item(mass, track))
     for album in albums:
@@ -640,7 +640,7 @@ async def _handle_favorites(
         items.append(_playlist_to_item(mass, playlist))
 
     page = items[offset : offset + limit]
-    return _paginate(page, offset, total_count=len(items))
+    return _convert_to_response(page, total_count=len(items))
 
 
 def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
@@ -697,7 +697,6 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
         page = all_items[offset : offset + limit]
         return {
             "item_loop": page,
-            "offset": offset,
             "count": len(all_items),
         }
 
