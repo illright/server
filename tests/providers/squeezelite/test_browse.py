@@ -67,7 +67,6 @@ _handle_playlistcontrol = _browse_mod._handle_playlistcontrol
 _handle_playlists = _browse_mod._handle_playlists
 _handle_search = _browse_mod._handle_search
 _handle_tracks = _browse_mod._handle_tracks
-_paginate = _browse_mod._paginate
 register_browse_handlers = _browse_mod.register_browse_handlers
 
 
@@ -148,26 +147,6 @@ def _make_mass_mock() -> MagicMock:
     mass.player_queues.get_active_queue = MagicMock(return_value=None)
     mass.player_queues.play_media = AsyncMock()
     return mass
-
-
-# --- Tests for _paginate ---
-
-
-class TestPaginate:
-    """Tests for the _paginate helper."""
-
-    def test_basic_pagination(self):
-        """Paginate returns items with offset and count."""
-        items = [{"id": "1"}, {"id": "2"}]
-        result = _paginate(items, 0)
-        assert result == {"item_loop": items, "offset": 0, "count": 2}
-
-    def test_with_total_count(self):
-        """Count uses total_count when provided."""
-        items = [{"id": "1"}]
-        result = _paginate(items, 5, total_count=100)
-        assert result["count"] == 100
-        assert result["offset"] == 5
 
 
 # --- Tests for _handle_artists ---
