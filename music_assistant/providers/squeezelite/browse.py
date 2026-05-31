@@ -584,11 +584,11 @@ async def _handle_playlistcontrol(
 
     if cmd == "delete":
         # Remove matching items from the current queue by URI.
-        queue_items = mass.player_queues.get_item(queue.queue_id)
+        queue_items = mass.player_queues.items(queue.queue_id)
         removed = 0
         for item in list(queue_items) if queue_items else []:
             if getattr(item, "uri", None) == uri:
-                await mass.player_queues.delete_item(queue.queue_id, item.queue_item_id)
+                mass.player_queues.delete_item(queue.queue_id, item.queue_item_id)
                 removed += 1
         return {"count": removed}
 
