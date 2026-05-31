@@ -300,6 +300,25 @@ class TestHandlePlaylists:
         assert len(result["item_loop"]) == 1
         assert result["item_loop"][0]["track"] == "Chill Song"
 
+    @pytest.mark.asyncio
+    async def test_playlists_tracks_subcommand(self):
+        """Controller sends 'playlists tracks <start> <count> playlist_id:<id>'.
+
+        The CLI dispatcher passes ["tracks", <start>, <count>] as positional args.
+        The handler must skip the "tracks" token and correctly parse pagination.
+        """
+        mass = _make_mass_mock()
+        playlist = _make_playlist("5", "Chill Mix")
+        tracks = [_make_track("1", "Song A"), _make_track("2", "Song B")]
+        mass.music.playlists.get_library_item = AsyncMock(return_value=playlist)
+        mass.music.playlists.tracks = AsyncMock(return_value=tracks)
+
+        # Simulates: playlists tracks 0 50 playlist_id:5
+        result = await _handle_playlists(mass, "player1", "tracks", 0, 50, playlist_id="5")
+
+        assert len(result["item_loop"]) == 2
+        assert result["item_loop"][0]["track"] == "Song A"
+
 
 # --- Tests for _handle_playlistcontrol ---
 

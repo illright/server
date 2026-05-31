@@ -440,7 +440,15 @@ async def _handle_playlists(
     Supported parameters:
         - search: Filter playlists by name substring.
         - playlist_id: Return tracks within a specific playlist.
+
+    The Controller sends 'playlists tracks <start> <count> playlist_id:<id>' to
+    browse into a playlist. The CLI dispatcher extracts command="playlists" and
+    passes ["tracks", <start>, <count>] as positional args, so we detect and skip
+    the "tracks" subcommand token before interpreting pagination args.
     """
+    # If called as "playlists tracks ...", shift args past the subcommand token.
+    if args and args[0] == "tracks":
+        args = args[1:]
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
