@@ -138,10 +138,10 @@ BrowseItem = (
 )
 
 
-def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
+def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str | None:
     """Return a proxied image URL for the given image, or empty string."""
     if not image:
-        return ""
+        return None
     return mass.metadata.get_image_url(image, size=IMAGE_PROXY_SIZE)
 
 
@@ -149,7 +149,7 @@ def _track_to_item(mass: MusicAssistant, track: Track) -> SlimBrowseTrackItem:
     """Convert a Track to a SlimBrowse item_loop entry."""
     artist_name = ", ".join(a.name for a in track.artists) if track.artists else ""
     album_name = track.album.name if track.album else ""
-    image_url = _get_image_url(mass, track.image)
+    image_url = _get_image_url(mass, track.image) or ""
     return {
         "id": track.item_id,
         "track": track.name,
@@ -177,7 +177,7 @@ def _track_to_item(mass: MusicAssistant, track: Track) -> SlimBrowseTrackItem:
 def _album_to_item(mass: MusicAssistant, album: Album) -> SlimBrowseAlbumItem:
     """Convert an Album to a SlimBrowse item_loop entry."""
     artist_name = ", ".join(a.name for a in album.artists) if album.artists else ""
-    image_url = _get_image_url(mass, album.image)
+    image_url = _get_image_url(mass, album.image) or ""
     return {
         "id": album.item_id,
         "album": album.name,
@@ -206,7 +206,7 @@ def _album_to_item(mass: MusicAssistant, album: Album) -> SlimBrowseAlbumItem:
 
 def _artist_to_item(mass: MusicAssistant, artist: Artist) -> SlimBrowseArtistItem:
     """Convert an Artist to a SlimBrowse item_loop entry."""
-    image_url = _get_image_url(mass, artist.image)
+    image_url = _get_image_url(mass, artist.image) or ""
     return {
         "id": artist.item_id,
         "artist": artist.name,
@@ -232,7 +232,7 @@ def _artist_to_item(mass: MusicAssistant, artist: Artist) -> SlimBrowseArtistIte
 
 def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> SlimBrowsePlaylistItem:
     """Convert a Playlist to a SlimBrowse item_loop entry."""
-    image_url = _get_image_url(mass, playlist.image)
+    image_url = _get_image_url(mass, playlist.image) or ""
     return {
         "id": playlist.item_id,
         "playlist": playlist.name,
