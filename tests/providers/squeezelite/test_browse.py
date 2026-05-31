@@ -395,6 +395,21 @@ class TestHandlePlaylistControl:
         assert result == {"count": 1}
         mass.player_queues.delete_item.assert_called_once_with("queue_1", "qi_1")
 
+    @pytest.mark.asyncio
+    async def test_delete_no_queue_items_returns_zero(self):
+        """Handler returns count 0 when queue has no items (get_item returns None)."""
+        mass = _make_mass_mock()
+        queue = MagicMock()
+        queue.queue_id = "queue_1"
+        mass.player_queues.get_active_queue = MagicMock(return_value=queue)
+        mass.player_queues.get_item = MagicMock(return_value=None)
+
+        result = await _handle_playlistcontrol(
+            mass, "player1", cmd="delete", uri="test://track/1"
+        )
+
+        assert result == {"count": 0}
+
 
 # --- Tests for _handle_favorites ---
 
