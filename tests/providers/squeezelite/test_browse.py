@@ -18,8 +18,30 @@ from music_assistant_models.media_items import (
 
 # Load the browse module directly to avoid the full music_assistant import chain
 # which requires Python 3.14+ and many heavy dependencies not needed for unit tests.
+
+# First, load the menu module and register it in sys.modules so that the browse
+# module's relative import (`from .menu import ...`) resolves correctly.
+import sys
+
+_menu_spec = importlib.util.spec_from_file_location(
+    "music_assistant.providers.squeezelite.menu",
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "music_assistant",
+        "providers",
+        "squeezelite",
+        "menu.py",
+    ),
+)
+_menu_mod = importlib.util.module_from_spec(_menu_spec)
+_menu_spec.loader.exec_module(_menu_mod)
+sys.modules["music_assistant.providers.squeezelite.menu"] = _menu_mod
+
 _browse_spec = importlib.util.spec_from_file_location(
-    "squeezelite_browse",
+    "music_assistant.providers.squeezelite.browse",
     os.path.join(
         os.path.dirname(__file__),
         "..",
@@ -37,7 +59,7 @@ _browse_mod = importlib.util.module_from_spec(_browse_spec)
 _browse_mod.__dict__["TYPE_CHECKING"] = False
 _browse_spec.loader.exec_module(_browse_mod)
 
-_build_library_menu_items = _browse_mod._build_library_menu_items
+build_library_menu_items = _menu_mod.build_library_menu_items
 _handle_albums = _browse_mod._handle_albums
 _handle_artists = _browse_mod._handle_artists
 _handle_favorites = _browse_mod._handle_favorites
@@ -53,6 +75,13 @@ register_browse_handlers = _browse_mod.register_browse_handlers
 
 
 def _make_provider_mapping(item_id: str = "1") -> set[ProviderMapping]:
+    """Create a minimal ProviderMapping set for test media items.
+
+    A ProviderMapping links a media item in Music Assistant's library to its source
+    in a specific provider (e.g., Spotify, local filesystem). Each item must have at
+    least one mapping so the system knows where the content originates from. In tests,
+    we use a dummy "test" provider.
+    """
     return {ProviderMapping(item_id=item_id, provider_domain="test", provider_instance="test_1")}
 
 
@@ -168,18 +197,17 @@ class TestHandleArtists:
         mass.music.artists.library_items.assert_called_once_with(search=None, limit=50, offset=0)
 
     @pytest.mark.asyncio
-    async def test_artist_id_redirects_to_albums(self):
-        """When artist_id is given, returns albums for that artist."""
+    async def test_artist_id_returns_artist_details(self):
+        """When artist_id is given, returns info for that specific artist."""
         mass = _make_mass_mock()
         artist = _make_artist("5", "Artist X")
-        album = _make_album("10", "Album X", artists=[artist])
         mass.music.artists.get_library_item = AsyncMock(return_value=artist)
-        mass.music.artists.albums = AsyncMock(return_value=[album])
 
         result = await _handle_artists(mass, "player1", 0, 50, artist_id="5")
 
         assert len(result["item_loop"]) == 1
-        assert result["item_loop"][0]["album"] == "Album X"
+        assert result["item_loop"][0]["artist"] == "Artist X"
+        assert result["count"] == 1
 
 
 # --- Tests for _handle_albums ---
@@ -283,7 +311,18 @@ class TestHandlePlaylists:
 
 
 class TestHandlePlaylistControl:
-    """Tests for the playlistcontrol handler."""
+    """Tests for the playlistcontrol handler.
+
+    'playlists' is the LMS CLI command for browsing/listing saved playlists in the
+    library (similar to browsing artists or albums).
+
+    'playlistcontrol' is a separate LMS CLI command for queue manipulation — it
+    controls what is currently playing by adding, inserting, or replacing items in
+    the active playback queue. Think of it as the "play this now" / "add to queue"
+    action triggered when a user selects a track or album on the Controller.
+
+    See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
+    """
 
     @pytest.mark.asyncio
     async def test_play_media(self):
@@ -295,6 +334,8 @@ class TestHandlePlaylistControl:
 
         result = await _handle_playlistcontrol(mass, "player1", cmd="play", uri="test://track/1")
 
+        # count=1 indicates that one item was successfully enqueued for playback.
+        # count=0 would indicate nothing was played (e.g., missing URI or no queue).
         assert result == {"count": 1}
         mass.player_queues.play_media.assert_called_once_with(
             "queue_1", "test://track/1", option=QueueOption.PLAY
@@ -302,7 +343,12 @@ class TestHandlePlaylistControl:
 
     @pytest.mark.asyncio
     async def test_no_uri_returns_zero_count(self):
-        """Handler returns count 0 when no URI is provided."""
+        """Handler returns count 0 when no URI is provided.
+
+        This case occurs when the Controller sends a playlistcontrol command
+        without a valid media URI (e.g., if the item's metadata was incomplete).
+        The handler must handle this gracefully rather than crashing.
+        """
         mass = _make_mass_mock()
         result = await _handle_playlistcontrol(mass, "player1", cmd="play", uri="")
         assert result == {"count": 0}
@@ -352,15 +398,22 @@ class TestHandleFavorites:
         assert len(result["item_loop"]) == 4
 
 
-# --- Tests for _build_library_menu_items ---
+# --- Tests for build_library_menu_items ---
 
 
 class TestBuildLibraryMenuItems:
-    """Tests for the library menu builder."""
+    """Tests for the library menu builder.
+
+    The menu item IDs (e.g., "myMusicArtists", "myMusicAlbums") follow the LMS/Lyrion
+    convention for built-in home menu entries. These IDs are recognized by the SqueezePlay
+    firmware to display the correct icons and navigation behavior.
+
+    See: https://lyrion.org/reference/home-vs-slimbrowse/
+    """
 
     def test_returns_expected_menu_entries(self):
         """Menu includes all required library categories."""
-        items = _build_library_menu_items()
+        items = build_library_menu_items()
         ids = [item["id"] for item in items]
         assert "myMusicArtists" in ids
         assert "myMusicAlbums" in ids
@@ -371,14 +424,14 @@ class TestBuildLibraryMenuItems:
 
     def test_search_has_input_field(self):
         """Search menu item has an input configuration for text entry."""
-        items = _build_library_menu_items()
+        items = build_library_menu_items()
         search_item = next(i for i in items if i["id"] == "myMusicSearch")
         assert "input" in search_item
         assert search_item["input"]["len"] == 1
 
     def test_all_items_have_go_action(self):
         """Every menu item has a 'go' action with a command."""
-        items = _build_library_menu_items()
+        items = build_library_menu_items()
         for item in items:
             assert "go" in item["actions"]
             assert "cmd" in item["actions"]["go"]
@@ -414,13 +467,19 @@ class TestRegisterBrowseHandlers:
 
     @pytest.mark.asyncio
     async def test_menu_handler_includes_library_items(self):
-        """Overridden menu handler includes library items plus original presets."""
+        """Overridden menu handler includes library items plus original menu entries.
+
+        The original menu handler returns items that were already registered on the
+        SlimProto server (e.g., by other plugins or the default server setup). Our
+        override prepends the library navigation items while preserving those existing
+        entries.
+        """
         mass = _make_mass_mock()
         slimproto = MagicMock()
         slimproto.cli = MagicMock()
-        preset_item = {"id": "preset_1", "text": "My Preset"}
+        original_menu_item = {"id": "existing_item_1", "text": "Some Existing Entry"}
         slimproto.cli._handle_menu = AsyncMock(
-            return_value={"item_loop": [preset_item], "offset": 0, "count": 1}
+            return_value={"item_loop": [original_menu_item], "offset": 0, "count": 1}
         )
 
         register_browse_handlers(mass, slimproto)
@@ -430,4 +489,4 @@ class TestRegisterBrowseHandlers:
 
         ids = [item["id"] for item in result["item_loop"]]
         assert "myMusicArtists" in ids
-        assert "preset_1" in ids
+        assert "existing_item_1" in ids

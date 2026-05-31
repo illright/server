@@ -1,11 +1,20 @@
-"""LMS CLI library browsing support for hardware Squeezebox players."""
+"""LMS CLI library browsing support for hardware Squeezebox players.
+
+Implements the server-side handlers for LMS CLI database commands as described in:
+https://lyrion.org/reference/cli/database/
+
+These handlers are registered on the SlimProto CLI instance so that hardware
+Squeezebox Controllers can browse the Music Assistant library.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from music_assistant_models.enums import MediaType, QueueOption
+
+from .menu import build_library_menu_items
 
 if TYPE_CHECKING:
     from music_assistant_models.media_items import Album, Artist, MediaItemImage, Playlist, Track
@@ -14,12 +23,45 @@ if TYPE_CHECKING:
 
 # ruff: noqa: ARG001
 
+# Image proxy size for artwork thumbnails sent to Squeezebox hardware displays.
+# Could be made configurable per-player in the future (e.g., based on screen resolution),
+# but 300px is a reasonable default for Controller/Touch screens.
+IMAGE_PROXY_SIZE = 300
+
+# Default number of items returned per page when the client does not specify a limit.
+DEFAULT_PAGE_SIZE = 50
+
+
+class LMSItemLoopResponse(TypedDict):
+    """Response format for LMS CLI commands that return lists of items.
+
+    See: https://lyrion.org/reference/cli/database/
+    The `item_loop` field contains the paginated results, `offset` is the starting
+    index of the returned page, and `count` is the total number of items available
+    (not just the items in this page).
+    """
+
+    item_loop: list[dict[str, Any]]
+    offset: int
+    count: int
+
+
+class LMSPlaylistControlResponse(TypedDict):
+    """Response format for the 'playlistcontrol' LMS CLI command.
+
+    See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
+    The `count` field indicates the number of items that were added/inserted/played
+    (1 on success, 0 if nothing was done).
+    """
+
+    count: int
+
 
 def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
     """Return a proxied image URL for the given image, or empty string."""
     if not image:
         return ""
-    return mass.metadata.get_image_url(image, size=300)
+    return mass.metadata.get_image_url(image, size=IMAGE_PROXY_SIZE)
 
 
 def _track_to_item(mass: MusicAssistant, track: Track) -> dict[str, Any]:
@@ -33,6 +75,9 @@ def _track_to_item(mass: MusicAssistant, track: Track) -> dict[str, Any]:
         "artist": artist_name,
         "album": album_name,
         "duration": track.duration or 0,
+        # trackType is set to "local" as a placeholder. LMS uses this field to indicate
+        # the source type (local, remote, etc.), but Music Assistant abstracts away the
+        # underlying provider. The Controller UI uses this mainly for display purposes.
         "trackType": "local",
         "icon": image_url,
         "artwork_url": image_url,
@@ -165,8 +210,17 @@ def _playable_actions(uri: str) -> dict[str, Any]:
     }
 
 
-def _paginate(items: list, offset: int, total_count: int | None = None) -> dict[str, Any]:
-    """Return a paginated response dict in LMS CLI format."""
+def _paginate(items: list, offset: int, total_count: int | None = None) -> LMSItemLoopResponse:
+    """Return a paginated response dict in LMS CLI format.
+
+    See: https://lyrion.org/reference/cli/database/
+
+    Args:
+        items: The page of items to return.
+        offset: The starting index of this page within the full result set.
+        total_count: The total number of items available across all pages.
+            If not provided, defaults to the length of the items list.
+    """
     return {
         "item_loop": items,
         "offset": offset,
@@ -179,15 +233,33 @@ async def _handle_artists(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
-    """Handle the 'artists' LMS CLI command."""
+) -> LMSItemLoopResponse:
+    """Handle the 'artists' LMS CLI command.
+
+    See: https://lyrion.org/reference/cli/database/#artists
+
+    Supported parameters:
+        - search: Filter artists by name substring.
+        - artist_id: Return info for a specific artist.
+        - album_id: Return artists that appear on a given album.
+        - genre_id: Return artists in a given genre.
+    """
     offset = int(args[0]) if args else 0
-    limit = int(args[1]) if len(args) > 1 else 50
+    limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
     artist_id = kwargs.get("artist_id")
+    album_id = kwargs.get("album_id")
 
     if artist_id:
-        return await _handle_albums(mass, player_id, 0, limit, artist_id=artist_id)
+        # Return info for the specific artist
+        artist = await mass.music.artists.get_library_item(int(artist_id))
+        items = [_artist_to_item(mass, artist)]
+        return _paginate(items, 0, total_count=1)
+
+    # Note: album_id and genre_id filters are not yet fully implemented in the
+    # Music Assistant library API. For now, we fall through to the general listing.
+    # TODO: Add filtering by album_id and genre_id when the library API supports it.
+    _ = album_id  # acknowledged but not yet implemented
 
     artists = await mass.music.artists.library_items(
         search=search,
@@ -203,10 +275,19 @@ async def _handle_albums(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
-    """Handle the 'albums' LMS CLI command."""
+) -> LMSItemLoopResponse:
+    """Handle the 'albums' LMS CLI command.
+
+    See: https://lyrion.org/reference/cli/database/#albums
+
+    Supported parameters:
+        - search: Filter albums by name substring.
+        - artist_id: Return albums by a specific artist.
+        - genre_id: Return albums in a given genre.
+        - album_id: Return info for a specific album.
+    """
     offset = int(args[0]) if args else 0
-    limit = int(args[1]) if len(args) > 1 else 50
+    limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
     artist_id = kwargs.get("artist_id")
 
@@ -234,10 +315,19 @@ async def _handle_tracks(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
-    """Handle the 'tracks' LMS CLI command."""
+) -> LMSItemLoopResponse:
+    """Handle the 'tracks' LMS CLI command.
+
+    See: https://lyrion.org/reference/cli/database/#titles
+
+    Supported parameters:
+        - search: Filter tracks by name substring.
+        - album_id: Return tracks on a specific album.
+        - artist_id: Return tracks by a specific artist.
+        - genre_id: Return tracks in a given genre.
+    """
     offset = int(args[0]) if args else 0
-    limit = int(args[1]) if len(args) > 1 else 50
+    limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
     album_id = kwargs.get("album_id")
 
@@ -265,10 +355,17 @@ async def _handle_playlists(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
-    """Handle the 'playlists' LMS CLI command."""
+) -> LMSItemLoopResponse:
+    """Handle the 'playlists' LMS CLI command.
+
+    See: https://lyrion.org/reference/cli/database/#playlists
+
+    Supported parameters:
+        - search: Filter playlists by name substring.
+        - playlist_id: Return tracks within a specific playlist.
+    """
     offset = int(args[0]) if args else 0
-    limit = int(args[1]) if len(args) > 1 else 50
+    limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
 
     playlist_id = kwargs.get("playlist_id")
@@ -296,10 +393,13 @@ async def _handle_genres(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
-    """Handle the 'genres' LMS CLI command."""
+) -> LMSItemLoopResponse:
+    """Handle the 'genres' LMS CLI command.
+
+    See: https://lyrion.org/reference/cli/database/#genres
+    """
     offset = int(args[0]) if args else 0
-    limit = int(args[1]) if len(args) > 1 else 50
+    limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
 
     genres = await mass.music.genres.library_items(
         limit=limit,
@@ -331,7 +431,7 @@ async def _handle_search(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
+) -> LMSItemLoopResponse:
     """Handle the 'search' LMS CLI command (term-based search)."""
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else 10
@@ -366,8 +466,11 @@ async def _handle_playlistcontrol(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
-    """Handle the 'playlistcontrol' LMS CLI command (play/add/insert media)."""
+) -> LMSPlaylistControlResponse:
+    """Handle the 'playlistcontrol' LMS CLI command (play/add/insert media).
+
+    See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
+    """
     cmd = kwargs.get("cmd", "play")
     uri = kwargs.get("uri", "")
 
@@ -394,10 +497,10 @@ async def _handle_favorites(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, Any]:
+) -> LMSItemLoopResponse:
     """Handle the 'favorites' LMS CLI command."""
     offset = int(args[0]) if args else 0
-    limit = int(args[1]) if len(args) > 1 else 50
+    limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
 
     tracks_coro = mass.music.tracks.library_items(favorite=True, limit=500, offset=0)
     albums_coro = mass.music.albums.library_items(favorite=True, limit=500, offset=0)
@@ -422,136 +525,6 @@ async def _handle_favorites(
     return _paginate(page, offset, total_count=len(items))
 
 
-def _build_library_menu_items() -> list[dict[str, Any]]:
-    """Build the static library menu items shown on the Squeezebox Controller home screen."""
-    return [
-        {
-            "id": "myMusicArtists",
-            "node": "myMusic",
-            "text": "Artists",
-            "homeMenuText": "Artists",
-            "icon": "html/images/artists.png",
-            "weight": 20,
-            "style": "itemNoAction",
-            "actions": {
-                "go": {
-                    "cmd": ["artists"],
-                    "itemsParams": "commonParams",
-                    "params": {},
-                    "player": 0,
-                },
-            },
-        },
-        {
-            "id": "myMusicAlbums",
-            "node": "myMusic",
-            "text": "Albums",
-            "homeMenuText": "Albums",
-            "icon": "html/images/albums.png",
-            "weight": 21,
-            "style": "itemNoAction",
-            "actions": {
-                "go": {
-                    "cmd": ["albums"],
-                    "itemsParams": "commonParams",
-                    "params": {},
-                    "player": 0,
-                },
-            },
-        },
-        {
-            "id": "myMusicTracks",
-            "node": "myMusic",
-            "text": "Songs",
-            "homeMenuText": "Songs",
-            "icon": "html/images/playall.png",
-            "weight": 22,
-            "style": "itemNoAction",
-            "actions": {
-                "go": {
-                    "cmd": ["tracks"],
-                    "itemsParams": "commonParams",
-                    "params": {},
-                    "player": 0,
-                },
-            },
-        },
-        {
-            "id": "myMusicGenres",
-            "node": "myMusic",
-            "text": "Genres",
-            "homeMenuText": "Genres",
-            "icon": "html/images/genres.png",
-            "weight": 23,
-            "style": "itemNoAction",
-            "actions": {
-                "go": {
-                    "cmd": ["genres"],
-                    "itemsParams": "commonParams",
-                    "params": {},
-                    "player": 0,
-                },
-            },
-        },
-        {
-            "id": "myMusicPlaylists",
-            "node": "myMusic",
-            "text": "Playlists",
-            "homeMenuText": "Playlists",
-            "icon": "html/images/playlists.png",
-            "weight": 24,
-            "style": "itemNoAction",
-            "actions": {
-                "go": {
-                    "cmd": ["playlists"],
-                    "itemsParams": "commonParams",
-                    "params": {},
-                    "player": 0,
-                },
-            },
-        },
-        {
-            "id": "myMusicFavorites",
-            "node": "myMusic",
-            "text": "Favorites",
-            "homeMenuText": "Favorites",
-            "icon": "html/images/favorites.png",
-            "weight": 25,
-            "style": "itemNoAction",
-            "actions": {
-                "go": {
-                    "cmd": ["favorites"],
-                    "itemsParams": "commonParams",
-                    "params": {},
-                    "player": 0,
-                },
-            },
-        },
-        {
-            "id": "myMusicSearch",
-            "node": "myMusic",
-            "text": "Search",
-            "homeMenuText": "Search",
-            "icon": "html/images/search.png",
-            "weight": 30,
-            "style": "itemNoAction",
-            "input": {
-                "len": 1,
-                "processingPopup": {"text": "SEARCHING"},
-                "help": {"text": "JIVE_SEARCHFOR_HELP"},
-            },
-            "actions": {
-                "go": {
-                    "cmd": ["search"],
-                    "itemsParams": "commonParams",
-                    "params": {"search": "__TAGGEDINPUT__"},
-                    "player": 0,
-                },
-            },
-        },
-    ]
-
-
 def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     """
     Register library browsing command handlers on the SlimServer.
@@ -563,42 +536,44 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     :param slimproto: The SlimServer instance to register handlers on.
     """
 
-    async def handle_artists(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_artists(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_artists(mass, player_id, *args, **kwargs)
 
-    async def handle_albums(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_albums(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_albums(mass, player_id, *args, **kwargs)
 
-    async def handle_tracks(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_tracks(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_tracks(mass, player_id, *args, **kwargs)
 
-    async def handle_playlists(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_playlists(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_playlists(mass, player_id, *args, **kwargs)
 
-    async def handle_genres(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_genres(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_genres(mass, player_id, *args, **kwargs)
 
-    async def handle_search(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_search(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_search(mass, player_id, *args, **kwargs)
 
-    async def handle_playlistcontrol(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_playlistcontrol(
+        player_id: str, *args: Any, **kwargs: Any
+    ) -> LMSPlaylistControlResponse:
         return await _handle_playlistcontrol(mass, player_id, *args, **kwargs)
 
-    async def handle_favorites(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def handle_favorites(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
         return await _handle_favorites(mass, player_id, *args, **kwargs)
 
     # Build the library menu items for the Squeezebox Controller's home menu
-    library_menu_items = _build_library_menu_items()
+    library_menu_items = build_library_menu_items()
 
     # Wrap the existing menu handler to include library entries
     cli = slimproto.cli
     original_handle_menu = cli._handle_menu
 
-    async def handle_menu(player_id: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Return library menu items merged with original presets."""
+    async def handle_menu(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+        """Return library menu items merged with the original menu items."""
         original = await original_handle_menu(player_id, *args, **kwargs)
-        preset_items = original.get("item_loop", [])
-        all_items = library_menu_items + preset_items
+        original_items = original.get("item_loop", [])
+        all_items = library_menu_items + original_items
         offset = int(args[0]) if args else int(kwargs.get("_index", 0))
         limit = int(args[1]) if len(args) > 1 else int(kwargs.get("_quantity", 200))
         page = all_items[offset : offset + limit]
@@ -608,8 +583,8 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
             "count": len(all_items),
         }
 
-    # Register handlers on the CLI object by setting _handle_<command> methods
-    # The CLI dispatches commands via getattr(self, f"_handle_{command}")
+    # Register handlers on the CLI object by setting _handle_<command> methods.
+    # The CLI dispatches commands via getattr(self, f"_handle_{command}").
     cli._handle_menu = handle_menu
     cli._handle_artists = handle_artists
     cli._handle_albums = handle_albums

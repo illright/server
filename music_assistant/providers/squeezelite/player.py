@@ -618,6 +618,10 @@ class SqueezelitePlayer(Player):
             if param.isnumeric():
                 await self.mass.player_queues.seek(queue.queue_id, int(param))
         elif event_data.startswith("playlist "):
+            # Handle a subset of LMS playlist CLI subcommands (shuffle, repeat, index).
+            # This is not an exhaustive list of all playlist commands — only those needed
+            # for hardware Controller button actions are implemented here. Additional
+            # commands (e.g., playlist move, playlist delete) could be added as needed.
             await self._handle_playlist_cli_command(event_data, queue)
         self.logger.log(VERBOSE_LOG_LEVEL, "CLI Event: %s", event_data)
 
@@ -631,6 +635,8 @@ class SqueezelitePlayer(Player):
 
         if subcommand == "shuffle":
             if arg == "?":
+                # Query not resolved here — the Controller firmware reads the current
+                # shuffle state from the player status response, not from this command.
                 return
             if arg in ("0", "1", "2"):
                 enabled = arg != "0"
@@ -642,6 +648,8 @@ class SqueezelitePlayer(Player):
             self.client.signal_update()
         elif subcommand == "repeat":
             if arg == "?":
+                # Query not resolved here — the Controller firmware reads the current
+                # repeat state from the player status response, not from this command.
                 return
             repeat_map = {"0": RepeatMode.OFF, "1": RepeatMode.ONE, "2": RepeatMode.ALL}
             if arg in repeat_map:
@@ -658,8 +666,10 @@ class SqueezelitePlayer(Player):
             self.client.signal_update()
         elif subcommand == "index":
             if arg == "?":
+                # Query not resolved here — the Controller firmware reads the current
+                # index from the status response, not from this command's response.
                 return
-            if arg in ("+1", "1"):
+            if arg == "+1":
                 await self.mass.player_queues.next(queue.queue_id)
             elif arg == "-1":
                 await self.mass.player_queues.previous(queue.queue_id)
