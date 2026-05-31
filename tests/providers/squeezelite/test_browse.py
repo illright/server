@@ -202,16 +202,16 @@ class TestHandleAlbums:
         assert result[1]["album"] == "Album A"
 
     @pytest.mark.asyncio
-    async def test_album_item_contains_go_action(self):
-        """Album items include a 'go' action for drilling into tracks."""
+    async def test_album_item_fields(self):
+        """Album items include id and album name."""
         mass = _make_mass_mock()
         mass.music.albums.library_items = AsyncMock(return_value=[_make_album()])
 
         result = await _handle_albums(mass, "player1", 0, 50)
 
         item = result[1]
-        assert "go" in item["actions"]
-        assert item["actions"]["go"]["cmd"] == ["tracks"]
+        assert "id" in item
+        assert "album" in item
 
 
 # --- Tests for _handle_tracks ---
@@ -230,7 +230,7 @@ class TestHandleTracks:
         result = await _handle_tracks(mass, "player1", 0, 50)
 
         assert result[0]["count"] == 2
-        assert result[1]["track"] == "Song A"
+        assert result[1]["title"] == "Song A"
 
     @pytest.mark.asyncio
     async def test_album_id_returns_album_tracks(self):
@@ -277,7 +277,7 @@ class TestHandlePlaylists:
         result = await _handle_playlists(mass, "player1", 0, 50, playlist_id="5")
 
         assert result[0]["count"] == 1
-        assert result[1]["track"] == "Chill Song"
+        assert result[1]["title"] == "Chill Song"
 
     @pytest.mark.asyncio
     async def test_playlists_tracks_subcommand(self):
@@ -296,7 +296,7 @@ class TestHandlePlaylists:
         result = await _handle_playlists(mass, "player1", "tracks", 0, 50, playlist_id="5")
 
         assert result[0]["count"] == 2
-        assert result[1]["track"] == "Song A"
+        assert result[1]["title"] == "Song A"
 
 
 # --- Tests for _handle_playlistcontrol ---

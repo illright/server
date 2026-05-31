@@ -7,31 +7,22 @@ The commands share names with LMS CLI database commands
 Each handler returns a list of "blocks" (dicts). The first block contains
 metadata (rescan status and total count), and subsequent blocks are the
 individual items. For example, the genres command returns:
-    [{"rescan": 1, "count": 16}, {"id": 1, "genre": "Acid Jazz"}, ...]
+    [{"rescan": 0, "count": 16}, {"id": 1, "genre": "Acid Jazz"}, ...]
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from music_assistant_models.enums import MediaType, QueueOption
 
 from .menu import build_library_menu_items
-from .slimbrowse_protocol import SlimBrowseActionsFields
 
 if TYPE_CHECKING:
-    from music_assistant_models.media_items import Album, Artist, MediaItemImage, Playlist, Track
-
     from music_assistant import MusicAssistant
 
 # ruff: noqa: ARG001
-
-# Image proxy size for artwork thumbnails sent to Squeezebox hardware displays.
-# Could be made configurable per-player in the future (e.g., based on screen resolution),
-# but 300px is a reasonable default for Controller/Touch screens.
-IMAGE_PROXY_SIZE = 300
 
 # Default number of items returned per page when the client does not specify a limit.
 DEFAULT_PAGE_SIZE = 50
@@ -46,265 +37,6 @@ class SlimBrowsePlaylistControlResponse(TypedDict):
     count: int
     # TODO: Not implemented, Music Assistant currently does not expose the status of rescanning
     rescan: NotRequired[Literal[1]]
-
-
-class SlimBrowseTrackItem(TypedDict):
-    """A single track entry in a browse response block.
-
-    See: https://lyrion.org/reference/slimbrowse/
-    """
-
-    id: str
-    track: str
-    artist: str
-    album: str
-    duration: int
-    trackType: str
-    icon: str
-    artwork_url: str
-    text: str
-    style: str
-    nextWindow: str
-    params: dict[str, Any]
-    actions: SlimBrowseActionsFields
-
-
-class SlimBrowseAlbumItem(TypedDict):
-    """A single album entry in a browse response block.
-
-    See: https://lyrion.org/reference/slimbrowse/
-    """
-
-    id: str
-    album: str
-    artist: str
-    year: int
-    icon: str
-    artwork_url: str
-    text: str
-    style: str
-    nextWindow: str
-    params: dict[str, Any]
-    actions: SlimBrowseActionsFields
-
-
-class SlimBrowseArtistItem(TypedDict):
-    """A single artist entry in a browse response block.
-
-    See: https://lyrion.org/reference/slimbrowse/
-    """
-
-    id: str
-    artist: str
-    icon: str
-    artwork_url: str
-    text: str
-    style: str
-    params: dict[str, Any]
-    actions: SlimBrowseActionsFields
-
-
-class SlimBrowsePlaylistItem(TypedDict):
-    """A single playlist entry in a browse response block.
-
-    See: https://lyrion.org/reference/slimbrowse/
-    """
-
-    id: str
-    playlist: str
-    icon: str
-    artwork_url: str
-    text: str
-    style: str
-    nextWindow: str
-    params: dict[str, Any]
-    actions: SlimBrowseActionsFields
-
-
-class SlimBrowseGenreItem(TypedDict):
-    """A single genre entry in a browse response block."""
-
-    id: str
-    genre: str
-    text: str
-    style: str
-    params: dict[str, Any]
-    actions: SlimBrowseActionsFields
-
-
-BrowseItem = (
-    SlimBrowseTrackItem
-    | SlimBrowseAlbumItem
-    | SlimBrowseArtistItem
-    | SlimBrowsePlaylistItem
-    | SlimBrowseGenreItem
-)
-
-
-def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str | None:
-    """Return a proxied image URL for the given image, or empty string."""
-    if not image:
-        return None
-    return mass.metadata.get_image_url(image, size=IMAGE_PROXY_SIZE)
-
-
-def _track_to_item(mass: MusicAssistant, track: Track) -> SlimBrowseTrackItem:
-    """Convert a Track to a browse response block."""
-    artist_name = ", ".join(a.name for a in track.artists) if track.artists else ""
-    album_name = track.album.name if track.album else ""
-    image_url = _get_image_url(mass, track.image) or ""
-    return {
-        "id": track.item_id,
-        "track": track.name,
-        "artist": artist_name,
-        "album": album_name,
-        "duration": track.duration or 0,
-        # trackType is set to "local" as a placeholder. LMS uses this field to indicate
-        # the source type (local, remote, etc.), but Music Assistant abstracts away the
-        # underlying provider. The Controller UI uses this mainly for display purposes.
-        "trackType": "local",
-        "icon": image_url,
-        "artwork_url": image_url,
-        "text": track.name,
-        "style": "itemplay",
-        "nextWindow": "nowPlaying",
-        "params": {
-            "track_id": track.item_id,
-            "item_id": track.item_id,
-            "uri": track.uri or "",
-        },
-        "actions": _playable_actions(track.uri or ""),
-    }
-
-
-def _album_to_item(mass: MusicAssistant, album: Album) -> SlimBrowseAlbumItem:
-    """Convert an Album to a browse response block."""
-    artist_name = ", ".join(a.name for a in album.artists) if album.artists else ""
-    image_url = _get_image_url(mass, album.image) or ""
-    return {
-        "id": album.item_id,
-        "album": album.name,
-        "artist": artist_name,
-        "year": album.year or 0,
-        "icon": image_url,
-        "artwork_url": image_url,
-        "text": album.name,
-        "style": "itemplay",
-        "nextWindow": "nowPlaying",
-        "params": {
-            "item_id": album.item_id,
-            "uri": album.uri or "",
-        },
-        "actions": {
-            "go": {
-                "cmd": ["tracks"],
-                "itemsParams": "commonParams",
-                "params": {"album_id": album.item_id},
-                "player": 0,
-            },
-            **_playable_actions(album.uri or ""),
-        },
-    }
-
-
-def _artist_to_item(mass: MusicAssistant, artist: Artist) -> SlimBrowseArtistItem:
-    """Convert an Artist to a browse response block."""
-    image_url = _get_image_url(mass, artist.image) or ""
-    return {
-        "id": artist.item_id,
-        "artist": artist.name,
-        "icon": image_url,
-        "artwork_url": image_url,
-        "text": artist.name,
-        "style": "itemNoAction",
-        "params": {
-            "item_id": artist.item_id,
-            "uri": artist.uri or "",
-        },
-        "actions": {
-            "go": {
-                "cmd": ["albums"],
-                "itemsParams": "commonParams",
-                "params": {"artist_id": artist.item_id},
-                "player": 0,
-            },
-            **_playable_actions(artist.uri or ""),
-        },
-    }
-
-
-def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> SlimBrowsePlaylistItem:
-    """Convert a Playlist to a browse response block."""
-    image_url = _get_image_url(mass, playlist.image) or ""
-    return {
-        "id": playlist.item_id,
-        "playlist": playlist.name,
-        "icon": image_url,
-        "artwork_url": image_url,
-        "text": playlist.name,
-        "style": "itemplay",
-        "nextWindow": "nowPlaying",
-        "params": {
-            "item_id": playlist.item_id,
-            "uri": playlist.uri or "",
-        },
-        "actions": {
-            "go": {
-                "cmd": ["playlists", "tracks"],
-                "itemsParams": "commonParams",
-                "params": {"playlist_id": playlist.item_id},
-                "player": 0,
-            },
-            **_playable_actions(playlist.uri or ""),
-        },
-    }
-
-
-def _playable_actions(uri: str) -> SlimBrowseActionsFields:
-    """Return standard play/add/insert actions for a playable URI."""
-    return {
-        "play": {
-            "cmd": ["playlistcontrol"],
-            "itemsParams": "commonParams",
-            "params": {"uri": uri, "cmd": "play"},
-            "player": 0,
-            "nextWindow": "nowPlaying",
-        },
-        "play-hold": {
-            "cmd": ["playlistcontrol"],
-            "itemsParams": "commonParams",
-            "params": {"uri": uri, "cmd": "load"},
-            "player": 0,
-            "nextWindow": "nowPlaying",
-        },
-        "add": {
-            "cmd": ["playlistcontrol"],
-            "itemsParams": "commonParams",
-            "params": {"uri": uri, "cmd": "add"},
-            "player": 0,
-            "nextWindow": "refresh",
-        },
-        "add-hold": {
-            "cmd": ["playlistcontrol"],
-            "itemsParams": "commonParams",
-            "params": {"uri": uri, "cmd": "insert"},
-            "player": 0,
-            "nextWindow": "refresh",
-        },
-    }
-
-
-def _convert_to_response(
-    items: Sequence[BrowseItem], total_count: int | None = None
-) -> list[dict[str, Any]]:
-    """Return a list of blocks: metadata block followed by item blocks.
-
-    :param items: The page of items to return.
-    :param total_count: The total number of items available across all pages.
-        If not provided, defaults to the length of the items list.
-    """
-    count = total_count if total_count is not None else len(items)
-    return [{"rescan": 1, "count": count}, *items]
 
 
 async def _handle_artists(
@@ -363,15 +95,28 @@ async def _handle_albums(
     See: https://lyrion.org/reference/cli/database/#albums
 
     Supported parameters:
-        - search: Filter albums by name substring.
+        - search: Filter albums by name substring, case insensitive.
         - artist_id: Return albums by a specific artist.
-        - genre_id: Return albums in a given genre.
         - album_id: Return info for a specific album.
+
+    The rest of the parameters are currently unsupported.
     """
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
     artist_id = kwargs.get("artist_id")
+    album_id = kwargs.get("album_id")
+
+    response_first_block = {
+        "rescan": 0,
+        "count": 0,
+    }
+
+    if album_id:
+        # Return info for the specific album
+        album = await mass.music.albums.get_library_item(int(album_id))
+        response_first_block["count"] = 1
+        return [response_first_block, {"id": album_id, "album": album.name}]
 
     if artist_id:
         artist = await mass.music.artists.get_library_item(int(artist_id))
@@ -379,17 +124,21 @@ async def _handle_albums(
             item_id=artist.item_id,
             provider_instance_id_or_domain=artist.provider,
         )
-        all_items = [_album_to_item(mass, album) for album in albums]
-        page = all_items[offset : offset + limit]
-        return _convert_to_response(page, total_count=len(all_items))
+        page = list(albums)[offset : offset + limit]
+        response_first_block["count"] = len(page)
+        return [response_first_block] + [
+            {"id": album.item_id, "album": album.name} for album in page
+        ]
 
     albums = await mass.music.albums.library_items(
         search=search,
         limit=limit,
         offset=offset,
     )
-    items = [_album_to_item(mass, album) for album in albums]
-    return _convert_to_response(items)
+    response_first_block["count"] = len(albums)
+    return [response_first_block] + [
+        {"id": album.item_id, "album": album.name} for album in albums
+    ]
 
 
 async def _handle_tracks(
@@ -403,15 +152,28 @@ async def _handle_tracks(
     See: https://lyrion.org/reference/cli/database/#titles
 
     Supported parameters:
-        - search: Filter tracks by name substring.
+        - search: Filter tracks by name substring, case insensitive.
         - album_id: Return tracks on a specific album.
-        - artist_id: Return tracks by a specific artist.
-        - genre_id: Return tracks in a given genre.
+        - track_id: Return info for a specific track.
+
+    The rest of the parameters are currently unsupported.
     """
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
     album_id = kwargs.get("album_id")
+    track_id = kwargs.get("track_id")
+
+    response_first_block = {
+        "rescan": 0,
+        "count": 0,
+    }
+
+    if track_id:
+        # Return info for the specific track
+        track = await mass.music.tracks.get_library_item(int(track_id))
+        response_first_block["count"] = 1
+        return [response_first_block, {"id": track_id, "title": track.name}]
 
     if album_id:
         album = await mass.music.albums.get_library_item(int(album_id))
@@ -419,17 +181,21 @@ async def _handle_tracks(
             item_id=album.item_id,
             provider_instance_id_or_domain=album.provider,
         )
-        all_items = [_track_to_item(mass, track) for track in tracks]
-        page = all_items[offset : offset + limit]
-        return _convert_to_response(page, total_count=len(all_items))
+        page = list(tracks)[offset : offset + limit]
+        response_first_block["count"] = len(page)
+        return [response_first_block] + [
+            {"id": track.item_id, "title": track.name} for track in page
+        ]
 
     tracks = await mass.music.tracks.library_items(
         search=search,
         limit=limit,
         offset=offset,
     )
-    items = [_track_to_item(mass, track) for track in tracks]
-    return _convert_to_response(items)
+    response_first_block["count"] = len(tracks)
+    return [response_first_block] + [
+        {"id": track.item_id, "title": track.name} for track in tracks
+    ]
 
 
 async def _handle_playlists(
@@ -443,8 +209,10 @@ async def _handle_playlists(
     See: https://lyrion.org/reference/cli/database/#playlists
 
     Supported parameters:
-        - search: Filter playlists by name substring.
+        - search: Filter playlists by name substring, case insensitive.
         - playlist_id: Return tracks within a specific playlist.
+
+    The rest of the parameters are currently unsupported.
 
     The Controller sends 'playlists tracks <start> <count> playlist_id:<id>' to
     browse into a playlist. The CLI dispatcher extracts command="playlists" and
@@ -458,6 +226,11 @@ async def _handle_playlists(
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
 
+    response_first_block = {
+        "rescan": 0,
+        "count": 0,
+    }
+
     playlist_id = kwargs.get("playlist_id")
     if playlist_id:
         playlist = await mass.music.playlists.get_library_item(int(playlist_id))
@@ -465,17 +238,21 @@ async def _handle_playlists(
             item_id=playlist.item_id,
             provider_instance_id_or_domain=playlist.provider,
         )
-        all_items = [_track_to_item(mass, track) for track in tracks]
-        page = all_items[offset : offset + limit]
-        return _convert_to_response(page, total_count=len(all_items))
+        page = list(tracks)[offset : offset + limit]
+        response_first_block["count"] = len(page)
+        return [response_first_block] + [
+            {"id": track.item_id, "title": track.name} for track in page
+        ]
 
     playlists = await mass.music.playlists.library_items(
         search=search,
         limit=limit,
         offset=offset,
     )
-    items = [_playlist_to_item(mass, playlist) for playlist in playlists]
-    return _convert_to_response(items)
+    response_first_block["count"] = len(playlists)
+    return [response_first_block] + [
+        {"id": playlist.item_id, "playlist": playlist.name} for playlist in playlists
+    ]
 
 
 async def _handle_genres(
@@ -487,33 +264,34 @@ async def _handle_genres(
     """Handle the 'genres' browse command.
 
     See: https://lyrion.org/reference/cli/database/#genres
+
+    Supported parameters:
+        - genre_id: Return info for a specific genre.
+
+    The rest of the parameters are currently unsupported.
     """
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
+    genre_id = kwargs.get("genre_id")
+
+    response_first_block = {
+        "rescan": 0,
+        "count": 0,
+    }
+
+    if genre_id:
+        genre = await mass.music.genres.get_library_item(int(genre_id))
+        response_first_block["count"] = 1
+        return [response_first_block, {"id": genre_id, "genre": genre.name}]
 
     genres = await mass.music.genres.library_items(
         limit=limit,
         offset=offset,
     )
-    items: list[SlimBrowseGenreItem] = [
-        {
-            "id": genre.item_id,
-            "genre": genre.name,
-            "text": genre.name,
-            "style": "itemNoAction",
-            "params": {"item_id": genre.item_id},
-            "actions": {
-                "go": {
-                    "cmd": ["albums"],
-                    "itemsParams": "commonParams",
-                    "params": {"genre_id": genre.item_id},
-                    "player": 0,
-                },
-            },
-        }
-        for genre in genres
+    response_first_block["count"] = len(genres)
+    return [response_first_block] + [
+        {"id": genre.item_id, "genre": genre.name} for genre in genres
     ]
-    return _convert_to_response(items)
 
 
 async def _handle_search(
@@ -534,8 +312,13 @@ async def _handle_search(
     limit = int(args[1]) if len(args) > 1 else 10
     term = kwargs.get("term", kwargs.get("search", ""))
 
+    response_first_block: dict[str, Any] = {
+        "rescan": 0,
+        "count": 0,
+    }
+
     if not term:
-        return _convert_to_response([])
+        return [response_first_block]
 
     results = await mass.music.search(
         search_query=str(term),
@@ -544,18 +327,19 @@ async def _handle_search(
         library_only=True,
     )
 
-    all_items: list[BrowseItem] = []
+    all_items: list[dict[str, Any]] = []
     for artist in results.artists:
-        all_items.append(_artist_to_item(mass, artist))
+        all_items.append({"id": artist.item_id, "artist": artist.name})
     for album in results.albums:
-        all_items.append(_album_to_item(mass, album))
+        all_items.append({"id": album.item_id, "album": album.name})
     for track in results.tracks:
-        all_items.append(_track_to_item(mass, track))
+        all_items.append({"id": track.item_id, "title": track.name})
     for playlist in results.playlists:
-        all_items.append(_playlist_to_item(mass, playlist))
+        all_items.append({"id": playlist.item_id, "playlist": playlist.name})
 
     page = all_items[offset : offset + limit]
-    return _convert_to_response(page, total_count=len(all_items))
+    response_first_block["count"] = len(page)
+    return [response_first_block] + page
 
 
 async def _handle_playlistcontrol(
@@ -633,18 +417,22 @@ async def _handle_favorites(
         tracks_coro, albums_coro, artists_coro, playlists_coro
     )
 
-    items: list[BrowseItem] = []
+    all_items: list[dict[str, Any]] = []
     for track in tracks:
-        items.append(_track_to_item(mass, track))
+        all_items.append({"id": track.item_id, "title": track.name})
     for album in albums:
-        items.append(_album_to_item(mass, album))
+        all_items.append({"id": album.item_id, "album": album.name})
     for artist in artists:
-        items.append(_artist_to_item(mass, artist))
+        all_items.append({"id": artist.item_id, "artist": artist.name})
     for playlist in playlists:
-        items.append(_playlist_to_item(mass, playlist))
+        all_items.append({"id": playlist.item_id, "playlist": playlist.name})
 
-    page = items[offset : offset + limit]
-    return _convert_to_response(page, total_count=len(items))
+    page = all_items[offset : offset + limit]
+    response_first_block: dict[str, Any] = {
+        "rescan": 0,
+        "count": len(page),
+    }
+    return [response_first_block] + page
 
 
 def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
