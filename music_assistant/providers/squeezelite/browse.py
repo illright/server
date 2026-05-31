@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from music_assistant_models.enums import MediaType, QueueOption
 
@@ -40,12 +40,12 @@ DEFAULT_PAGE_SIZE = 50
 class SlimBrowsePlaylistControlResponse(TypedDict):
     """Response format for the 'playlistcontrol' command over SlimBrowse.
 
-    The command is documented at: https://lyrion.org/reference/cli/playlist/#playlistcontrol
-    but the response is delivered as structured JSON via JSONRPC/CometD (SlimBrowse),
-    not as a CLI text string.
+    The command is documented at: https://lyrion.org/reference/cli/playlist/#playlistcontrol.
     """
 
     count: int
+    # TODO: Not implemented, Music Assistant currently does not expose the status of rescanning
+    rescan: NotRequired[Literal[1]]
 
 
 class SlimBrowseTrackItem(TypedDict):
@@ -318,34 +318,38 @@ async def _handle_artists(
     See: https://lyrion.org/reference/cli/database/#artists
 
     Supported parameters:
-        - search: Filter artists by name substring.
+        - search: Filter artists by name substring, case insensitive.
         - artist_id: Return info for a specific artist.
-        - album_id: Return artists that appear on a given album.
-        - genre_id: Return artists in a given genre.
+
+    The rest of the parameters are currently unsupported.
     """
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
     search = kwargs.get("search")
     artist_id = kwargs.get("artist_id")
-    album_id = kwargs.get("album_id")
+
+    response_first_block = {
+        "rescan": 0,
+        "count": 0,
+    }
 
     if artist_id:
         # Return info for the specific artist
         artist = await mass.music.artists.get_library_item(int(artist_id))
-        items = [_artist_to_item(mass, artist)]
-        return _convert_to_response(items)
+        response_first_block["count"] = 1
+        return [response_first_block, {"id": artist_id, "artist": artist.name}]
 
-    # Note: album_id and genre_id filters are not yet fully implemented in the
-    # Music Assistant library API. For now, we fall through to the general listing.
-    # TODO: Add filtering by album_id and genre_id when the library API supports it.
+    # TODO: Add filtering by album_id and genre_id
 
     artists = await mass.music.artists.library_items(
         search=search,
         limit=limit,
         offset=offset,
     )
-    items = [_artist_to_item(mass, artist) for artist in artists]
-    return _convert_to_response(items)
+    response_first_block["count"] = len(artists)
+    return [response_first_block] + [
+        {"id": artist.item_id, "artist": artist.name} for artist in artists
+    ]
 
 
 async def _handle_albums(
