@@ -352,7 +352,7 @@ async def _handle_genres(
             {
                 "id": genre_id,
                 "genre": genre.name,
-                "textkey": genre.name[0].upper() if genre.name else "",
+                "textkey": _get_textkey(genre),
             },
         ]
 
@@ -365,7 +365,7 @@ async def _handle_genres(
         {
             "id": genre.item_id,
             "genre": genre.name,
-            "textkey": genre.name[0].upper() if genre.name else "",
+            "textkey": _get_textkey(genre),
         }
         for genre in genres
     ]
