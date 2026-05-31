@@ -75,13 +75,7 @@ register_browse_handlers = _browse_mod.register_browse_handlers
 
 
 def _make_provider_mapping(item_id: str = "1") -> set[ProviderMapping]:
-    """Create a minimal ProviderMapping set for test media items.
-
-    A ProviderMapping links a media item in Music Assistant's library to its source
-    in a specific provider (e.g., Spotify, local filesystem). Each item must have at
-    least one mapping so the system knows where the content originates from. In tests,
-    we use a dummy "test" provider.
-    """
+    """Create a minimal ProviderMapping set for test media items with a dummy provider."""
     return {ProviderMapping(item_id=item_id, provider_domain="test", provider_instance="test_1")}
 
 

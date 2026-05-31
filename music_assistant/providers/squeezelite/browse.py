@@ -215,11 +215,10 @@ def _paginate(items: list, offset: int, total_count: int | None = None) -> LMSIt
 
     See: https://lyrion.org/reference/cli/database/
 
-    Args:
-        items: The page of items to return.
-        offset: The starting index of this page within the full result set.
-        total_count: The total number of items available across all pages.
-            If not provided, defaults to the length of the items list.
+    :param items: The page of items to return.
+    :param offset: The starting index of this page within the full result set.
+    :param total_count: The total number of items available across all pages.
+        If not provided, defaults to the length of the items list.
     """
     return {
         "item_loop": items,
@@ -259,7 +258,6 @@ async def _handle_artists(
     # Note: album_id and genre_id filters are not yet fully implemented in the
     # Music Assistant library API. For now, we fall through to the general listing.
     # TODO: Add filtering by album_id and genre_id when the library API supports it.
-    _ = album_id  # acknowledged but not yet implemented
 
     artists = await mass.music.artists.library_items(
         search=search,
