@@ -164,9 +164,10 @@ class TestHandleArtists:
 
         result = await _handle_artists(mass, "player1", 0, 50)
 
-        assert len(result["item_loop"]) == 2
-        assert result["item_loop"][0]["artist"] == "Artist A"
-        assert result["item_loop"][1]["artist"] == "Artist B"
+        # First block is metadata, subsequent blocks are items
+        assert result[0]["count"] == 2
+        assert result[1]["artist"] == "Artist A"
+        assert result[2]["artist"] == "Artist B"
         mass.music.artists.library_items.assert_called_once_with(search=None, limit=50, offset=0)
 
     @pytest.mark.asyncio
@@ -178,9 +179,8 @@ class TestHandleArtists:
 
         result = await _handle_artists(mass, "player1", 0, 50, artist_id="5")
 
-        assert len(result["item_loop"]) == 1
-        assert result["item_loop"][0]["artist"] == "Artist X"
-        assert result["count"] == 1
+        assert result[0]["count"] == 1
+        assert result[1]["artist"] == "Artist X"
 
 
 # --- Tests for _handle_albums ---
@@ -198,8 +198,8 @@ class TestHandleAlbums:
 
         result = await _handle_albums(mass, "player1", 0, 50)
 
-        assert len(result["item_loop"]) == 2
-        assert result["item_loop"][0]["album"] == "Album A"
+        assert result[0]["count"] == 2
+        assert result[1]["album"] == "Album A"
 
     @pytest.mark.asyncio
     async def test_album_item_contains_go_action(self):
@@ -209,7 +209,7 @@ class TestHandleAlbums:
 
         result = await _handle_albums(mass, "player1", 0, 50)
 
-        item = result["item_loop"][0]
+        item = result[1]
         assert "go" in item["actions"]
         assert item["actions"]["go"]["cmd"] == ["tracks"]
 
@@ -229,8 +229,8 @@ class TestHandleTracks:
 
         result = await _handle_tracks(mass, "player1", 0, 50)
 
-        assert len(result["item_loop"]) == 2
-        assert result["item_loop"][0]["track"] == "Song A"
+        assert result[0]["count"] == 2
+        assert result[1]["track"] == "Song A"
 
     @pytest.mark.asyncio
     async def test_album_id_returns_album_tracks(self):
@@ -243,8 +243,8 @@ class TestHandleTracks:
 
         result = await _handle_tracks(mass, "player1", 0, 50, album_id="3")
 
-        assert len(result["item_loop"]) == 2
-        assert result["count"] == 2
+        assert result[0]["count"] == 2
+        assert len(result) == 3  # metadata + 2 tracks
 
 
 # --- Tests for _handle_playlists ---
@@ -262,8 +262,8 @@ class TestHandlePlaylists:
 
         result = await _handle_playlists(mass, "player1", 0, 50)
 
-        assert len(result["item_loop"]) == 1
-        assert result["item_loop"][0]["playlist"] == "My Playlist"
+        assert result[0]["count"] == 1
+        assert result[1]["playlist"] == "My Playlist"
 
     @pytest.mark.asyncio
     async def test_playlist_id_returns_tracks(self):
@@ -276,8 +276,8 @@ class TestHandlePlaylists:
 
         result = await _handle_playlists(mass, "player1", 0, 50, playlist_id="5")
 
-        assert len(result["item_loop"]) == 1
-        assert result["item_loop"][0]["track"] == "Chill Song"
+        assert result[0]["count"] == 1
+        assert result[1]["track"] == "Chill Song"
 
     @pytest.mark.asyncio
     async def test_playlists_tracks_subcommand(self):
@@ -295,8 +295,8 @@ class TestHandlePlaylists:
         # Simulates: playlists tracks 0 50 playlist_id:5
         result = await _handle_playlists(mass, "player1", "tracks", 0, 50, playlist_id="5")
 
-        assert len(result["item_loop"]) == 2
-        assert result["item_loop"][0]["track"] == "Song A"
+        assert result[0]["count"] == 2
+        assert result[1]["track"] == "Song A"
 
 
 # --- Tests for _handle_playlistcontrol ---
@@ -426,8 +426,8 @@ class TestHandleFavorites:
 
         result = await _handle_favorites(mass, "player1", 0, 50)
 
-        assert result["count"] == 4
-        assert len(result["item_loop"]) == 4
+        assert result[0]["count"] == 4
+        assert len(result) == 5  # metadata + 4 items
 
 
 # --- Tests for build_library_menu_items ---
