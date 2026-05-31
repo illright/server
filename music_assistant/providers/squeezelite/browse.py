@@ -1,10 +1,14 @@
-"""LMS CLI library browsing support for hardware Squeezebox players.
+"""SlimBrowse library browsing support for hardware Squeezebox players.
 
-Implements the server-side handlers for LMS CLI database commands as described in:
-https://lyrion.org/reference/cli/database/
+Implements the server-side handlers for Squeezebox library browsing over the
+JSONRPC/CometD transport (SlimBrowse protocol). While the commands share names
+with LMS CLI database commands (https://lyrion.org/reference/cli/database/),
+the responses here use the SlimBrowse item_loop format described at:
+https://lyrion.org/reference/slimbrowse/
 
-These handlers are registered on the SlimProto CLI instance so that hardware
-Squeezebox Controllers can browse the Music Assistant library.
+LMS CLI and SlimBrowse are distinct protocols — LMS CLI returns tagged parameter
+strings, while SlimBrowse returns structured JSON with item_loop arrays. These
+handlers serve the SlimBrowse layer.
 """
 
 from __future__ import annotations
@@ -32,15 +36,15 @@ IMAGE_PROXY_SIZE = 300
 DEFAULT_PAGE_SIZE = 50
 
 
-class LMSItemLoopResponse(TypedDict):
-    """Response format for LMS CLI commands that return lists of items.
+class SlimBrowseItemResponse(TypedDict):
+    """Response format for SlimBrowse commands that return lists of items.
 
-    The item_loop structure follows the SlimBrowse protocol format:
+    This is the structured JSON response sent over JSONRPC/CometD to Squeezebox
+    hardware Controllers. The format is defined by the SlimBrowse protocol:
     https://lyrion.org/reference/slimbrowse/
 
-    The `item_loop` field contains the paginated results, `offset` is the starting
-    index of the returned page, and `count` is the total number of items available
-    (not just the items in this page).
+    Note: This is NOT the LMS CLI text-protocol format. LMS CLI database commands
+    return tagged parameter strings; these handlers serve the SlimBrowse layer instead.
     """
 
     item_loop: list[dict[str, Any]]
@@ -48,16 +52,18 @@ class LMSItemLoopResponse(TypedDict):
     count: int
 
 
-class LMSPlaylistControlResponse(TypedDict):
-    """Response format for the 'playlistcontrol' LMS CLI command.
+class SlimBrowsePlaylistControlResponse(TypedDict):
+    """Response format for the 'playlistcontrol' command over SlimBrowse.
 
-    See: https://lyrion.org/reference/cli/playlist/#playlistcontrol
+    The command is documented at: https://lyrion.org/reference/cli/playlist/#playlistcontrol
+    but the response is delivered as structured JSON via JSONRPC/CometD (SlimBrowse),
+    not as a CLI text string.
     """
 
     count: int
 
 
-class LMSTrackItem(TypedDict):
+class SlimBrowseTrackItem(TypedDict):
     """A single track entry in a SlimBrowse item_loop response.
 
     See: https://lyrion.org/reference/slimbrowse/
@@ -78,7 +84,7 @@ class LMSTrackItem(TypedDict):
     actions: dict[str, Any]
 
 
-class LMSAlbumItem(TypedDict):
+class SlimBrowseAlbumItem(TypedDict):
     """A single album entry in a SlimBrowse item_loop response.
 
     See: https://lyrion.org/reference/slimbrowse/
@@ -97,7 +103,7 @@ class LMSAlbumItem(TypedDict):
     actions: dict[str, Any]
 
 
-class LMSArtistItem(TypedDict):
+class SlimBrowseArtistItem(TypedDict):
     """A single artist entry in a SlimBrowse item_loop response.
 
     See: https://lyrion.org/reference/slimbrowse/
@@ -113,7 +119,7 @@ class LMSArtistItem(TypedDict):
     actions: dict[str, Any]
 
 
-class LMSPlaylistItem(TypedDict):
+class SlimBrowsePlaylistItem(TypedDict):
     """A single playlist entry in a SlimBrowse item_loop response.
 
     See: https://lyrion.org/reference/slimbrowse/
@@ -137,8 +143,8 @@ def _get_image_url(mass: MusicAssistant, image: MediaItemImage | None) -> str:
     return mass.metadata.get_image_url(image, size=IMAGE_PROXY_SIZE)
 
 
-def _track_to_item(mass: MusicAssistant, track: Track) -> LMSTrackItem:
-    """Convert a Track to an LMS SlimBrowse item_loop entry."""
+def _track_to_item(mass: MusicAssistant, track: Track) -> SlimBrowseTrackItem:
+    """Convert a Track to a SlimBrowse item_loop entry."""
     artist_name = ", ".join(a.name for a in track.artists) if track.artists else ""
     album_name = track.album.name if track.album else ""
     image_url = _get_image_url(mass, track.image)
@@ -166,8 +172,8 @@ def _track_to_item(mass: MusicAssistant, track: Track) -> LMSTrackItem:
     }
 
 
-def _album_to_item(mass: MusicAssistant, album: Album) -> LMSAlbumItem:
-    """Convert an Album to an LMS SlimBrowse item_loop entry."""
+def _album_to_item(mass: MusicAssistant, album: Album) -> SlimBrowseAlbumItem:
+    """Convert an Album to a SlimBrowse item_loop entry."""
     artist_name = ", ".join(a.name for a in album.artists) if album.artists else ""
     image_url = _get_image_url(mass, album.image)
     return {
@@ -196,8 +202,8 @@ def _album_to_item(mass: MusicAssistant, album: Album) -> LMSAlbumItem:
     }
 
 
-def _artist_to_item(mass: MusicAssistant, artist: Artist) -> LMSArtistItem:
-    """Convert an Artist to an LMS SlimBrowse item_loop entry."""
+def _artist_to_item(mass: MusicAssistant, artist: Artist) -> SlimBrowseArtistItem:
+    """Convert an Artist to a SlimBrowse item_loop entry."""
     image_url = _get_image_url(mass, artist.image)
     return {
         "id": artist.item_id,
@@ -222,8 +228,8 @@ def _artist_to_item(mass: MusicAssistant, artist: Artist) -> LMSArtistItem:
     }
 
 
-def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> LMSPlaylistItem:
-    """Convert a Playlist to an LMS SlimBrowse item_loop entry."""
+def _playlist_to_item(mass: MusicAssistant, playlist: Playlist) -> SlimBrowsePlaylistItem:
+    """Convert a Playlist to a SlimBrowse item_loop entry."""
     image_url = _get_image_url(mass, playlist.image)
     return {
         "id": playlist.item_id,
@@ -283,7 +289,7 @@ def _playable_actions(uri: str) -> dict[str, Any]:
     }
 
 
-def _paginate(items: list, offset: int, total_count: int | None = None) -> LMSItemLoopResponse:
+def _paginate(items: list, offset: int, total_count: int | None = None) -> SlimBrowseItemResponse:
     """Return a paginated response dict in LMS CLI format.
 
     See: https://lyrion.org/reference/cli/database/
@@ -305,7 +311,7 @@ async def _handle_artists(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'artists' LMS CLI command.
 
     See: https://lyrion.org/reference/cli/database/#artists
@@ -346,7 +352,7 @@ async def _handle_albums(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'albums' LMS CLI command.
 
     See: https://lyrion.org/reference/cli/database/#albums
@@ -386,7 +392,7 @@ async def _handle_tracks(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'tracks' LMS CLI command.
 
     See: https://lyrion.org/reference/cli/database/#titles
@@ -426,7 +432,7 @@ async def _handle_playlists(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'playlists' LMS CLI command.
 
     See: https://lyrion.org/reference/cli/database/#playlists
@@ -464,7 +470,7 @@ async def _handle_genres(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'genres' LMS CLI command.
 
     See: https://lyrion.org/reference/cli/database/#genres
@@ -502,7 +508,7 @@ async def _handle_search(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'search' LMS CLI command (term-based search)."""
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else 10
@@ -537,7 +543,7 @@ async def _handle_playlistcontrol(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSPlaylistControlResponse:
+) -> SlimBrowsePlaylistControlResponse:
     """Handle the 'playlistcontrol' LMS CLI command (play/add/insert media).
 
     See: https://lyrion.org/reference/cli/playlists/#playlistcontrol
@@ -568,7 +574,7 @@ async def _handle_favorites(
     player_id: str,
     *args: Any,
     **kwargs: Any,
-) -> LMSItemLoopResponse:
+) -> SlimBrowseItemResponse:
     """Handle the 'favorites' LMS CLI command."""
     offset = int(args[0]) if args else 0
     limit = int(args[1]) if len(args) > 1 else DEFAULT_PAGE_SIZE
@@ -607,30 +613,30 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     :param slimproto: The SlimServer instance to register handlers on.
     """
 
-    async def handle_artists(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_artists(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_artists(mass, player_id, *args, **kwargs)
 
-    async def handle_albums(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_albums(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_albums(mass, player_id, *args, **kwargs)
 
-    async def handle_tracks(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_tracks(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_tracks(mass, player_id, *args, **kwargs)
 
-    async def handle_playlists(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_playlists(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_playlists(mass, player_id, *args, **kwargs)
 
-    async def handle_genres(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_genres(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_genres(mass, player_id, *args, **kwargs)
 
-    async def handle_search(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_search(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_search(mass, player_id, *args, **kwargs)
 
     async def handle_playlistcontrol(
         player_id: str, *args: Any, **kwargs: Any
-    ) -> LMSPlaylistControlResponse:
+    ) -> SlimBrowsePlaylistControlResponse:
         return await _handle_playlistcontrol(mass, player_id, *args, **kwargs)
 
-    async def handle_favorites(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_favorites(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         return await _handle_favorites(mass, player_id, *args, **kwargs)
 
     # Build the library menu items for the Squeezebox Controller's home menu
@@ -640,7 +646,7 @@ def register_browse_handlers(mass: MusicAssistant, slimproto: Any) -> None:
     cli = slimproto.cli
     original_handle_menu = cli._handle_menu
 
-    async def handle_menu(player_id: str, *args: Any, **kwargs: Any) -> LMSItemLoopResponse:
+    async def handle_menu(player_id: str, *args: Any, **kwargs: Any) -> SlimBrowseItemResponse:
         """Return library menu items merged with the original menu items."""
         original = await original_handle_menu(player_id, *args, **kwargs)
         original_items = original.get("item_loop", [])
